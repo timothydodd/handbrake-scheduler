@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "HandbrakeScheduler": {
+      "commandName": "Project",
+      //"commandLineArgs": "-s 1"
+    }
+  }
+}
