@@ -2,11 +2,12 @@
 
 This .NET 8 application is designed to schedule and automate video encoding using HandBrakeCLI. It allows you to specify the input folders, output locations, encoding presets, and schedule encoding during specific parts of the day.
 
+
 ## Features
 
 - **Multiple Folder Support:** Configure multiple folders for encoding with individual settings.
 - **Custom Presets:** Use any HandBrake preset for your encoding tasks.
-- **Scheduled Encoding:** Set specific times for the encoding process to run.
+- **Scheduled Encoding:** Set specific times for the encoding process to run. (this should wake your computer if asleep)
 - **Automated Cleanup:** Option to delete source files after encoding.
 - **Folder Structure Preservation:** Retain the original folder structure in the output directory.
 - **Logging:** Detailed logging for monitoring and troubleshooting.
