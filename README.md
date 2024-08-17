@@ -65,19 +65,19 @@ HandBrakeCliPath: Path to the HandBrakeCLI executable.
 
 - Folders: An array of folder configurations where you can define:
 
--- InputPath: Path to the folder containing videos to encode.
--- Preset: The HandBrake encoding preset to use.
--- PreserveFolderStructure: Set to true to maintain the folder structure in the output.
--- DeleteSource: Set to true to delete the original files after encoding.
--- OutputPath: Destination folder for encoded videos.
--- FileExtensions: File types to encode (e.g., .mkv, .mp4).
+    - InputPath: Path to the folder containing videos to encode.
+    - Preset: The HandBrake encoding preset to use.
+    - PreserveFolderStructure: Set to true to maintain the folder structure in the output.
+    - DeleteSource: Set to true to delete the original files after encoding.
+    - OutputPath: Destination folder for encoded videos.
+    - FileExtensions: File types to encode (e.g., .mkv, .mp4).
 - Schedule:
 
--- Enabled: Set to true to activate scheduled encoding.
--- StartTime and EndTime: Define the time window for encoding tasks.
--- User and Password: Optional credentials for secure environments.
+    - Enabled: Set to true to activate scheduled encoding.
+    - StartTime and EndTime: Define the time window for encoding tasks.
+    - User and Password: Optional credentials for secure environments.
 - Logging:
-- Adjust the log level (Default) to control the verbosity of logs.
+    - Adjust the log level (Default) to control the verbosity of logs.
 
 ## Usage
 1. Setup HandBrakeCLI:
