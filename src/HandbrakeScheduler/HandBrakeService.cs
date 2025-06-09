@@ -1,6 +1,6 @@
-﻿using Microsoft.Extensions.Logging;
+﻿using System.Diagnostics.CodeAnalysis;
+using Microsoft.Extensions.Logging;
 using ShellProgressBar;
-using System.Diagnostics.CodeAnalysis;
 
 namespace HandbrakeScheduler
 {
@@ -38,6 +38,11 @@ namespace HandbrakeScheduler
             {
                 try
                 {
+                    if (Directory.Exists(folder.InputPath) == false)
+                    {
+                        _logger.LogWarning("Folder {folder} does not exist", folder.InputPath);
+                        continue;
+                    }
                     IEnumerable<string> files = FindVideos(folder.InputPath, folder.FileExtensions);
                     foreach (string f in files)
                     {
