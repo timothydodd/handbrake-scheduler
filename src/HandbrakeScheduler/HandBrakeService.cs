@@ -9,30 +9,25 @@ namespace HandbrakeScheduler
         private readonly HandBrakeCli _cli;
         private readonly HandBrakeSettings _settings;
         private readonly CommandOptions _commandOptions;
-        private readonly SchedulerService _schedulerService;
-        private readonly ScheduleSettings _scheduleSettings;
         private readonly ILogger<HandBrakeService> _logger;
         public HandBrakeService(
 
             HandBrakeCli cli,
-            HandBrakeSettings settings, CommandOptions commandOptions, SchedulerService schedulerService, ScheduleSettings scheduleSettings, ILogger<HandBrakeService> logger)
+            HandBrakeSettings settings, CommandOptions commandOptions, ILogger<HandBrakeService> logger)
         {
             _cli = cli;
-            _settings = settings;
-            _schedulerService = schedulerService;
-            _scheduleSettings = scheduleSettings;
             _logger = logger;
             _commandOptions = commandOptions;
+            _settings = settings;
         }
 
-        [RequiresAssemblyFiles("Calls HandbrakeScheduler.SchedulerService.ScheduleTasks()")]
+
         public async Task DoWork()
         {
-            if (!_commandOptions.SchedulerMode)
-            {
-                _schedulerService.ScheduleTasks();
-            }
+
             _logger.LogInformation("Started Work");
+            string version = await _cli.GetVersionAsync();
+            Console.WriteLine($"HandBrake Version: {version}");
             DateTime startTime = DateTime.Now;
             foreach (FolderSetting folder in _settings.Folders)
             {
@@ -62,31 +57,6 @@ namespace HandbrakeScheduler
                             bar.Tick((int)s.Percentage, s.Estimated, $"{fileName} - AverageFps: {s.AverageFps}");
                         }, true, folder.DeleteSource);
 
-                        if (_commandOptions.SchedulerMode && _scheduleSettings.StartTime.HasValue && _scheduleSettings.EndTime.HasValue)
-                        {
-                            if (_scheduleSettings.EndTime.Value < _scheduleSettings.StartTime.Value)
-                            {
-                                DateTime endTime = startTime.Date.AddDays(1) + _scheduleSettings.EndTime.Value;
-
-                                if (endTime < DateTime.Now)
-                                {
-                                    _logger.LogInformation("Scheduled EndTime Triggered is before current time, exiting");
-                                    return;
-                                }
-
-                            }
-                            else
-                            {
-                                DateTime endTime = startTime.Date + _scheduleSettings.EndTime.Value;
-
-                                if (endTime < DateTime.Now)
-                                {
-                                    _logger.LogInformation("Scheduled EndTime Triggered is before current time, exiting");
-                                    return;
-                                }
-                            }
-
-                        }
 
 
                     }
@@ -111,6 +81,6 @@ namespace HandbrakeScheduler
                 Directory.EnumerateFiles(folder, "*.*", SearchOption.AllDirectories)
                 .Where(s => extensions.Contains(Path.GetExtension(s), StringComparer.InvariantCultureIgnoreCase));
         }
-
+     
     }
 }

@@ -13,9 +13,7 @@ namespace HandbrakeScheduler
 
         private static IConfigurationRoot? _configuration;
 
-        [RequiresUnreferencedCode("Calls HandbrakeScheduler.Program.Configure()")]
-        [RequiresDynamicCode("Calls HandbrakeScheduler.Program.Configure()")]
-        [RequiresAssemblyFiles("Calls HandbrakeScheduler.HandBrakeService.DoWork()")]
+     
         private static async Task Main(string[] args)
         {
             KillAllHandBrakeCli();
@@ -41,8 +39,7 @@ namespace HandbrakeScheduler
             await importer.DoWork();
 
         }
-        [RequiresUnreferencedCode("Calls Microsoft.Extensions.Configuration.ConfigurationBinder.Get<T>()")]
-        [RequiresDynamicCode("Calls Microsoft.Extensions.Configuration.ConfigurationBinder.Get<T>()")]
+       
         private static void Configure(string[] args)
         {
             IConfigurationBuilder builder = new ConfigurationBuilder()
@@ -71,10 +68,7 @@ namespace HandbrakeScheduler
                     Console.WriteLine("Scheduler Mode: " + commandOptions.SchedulerMode.ToString());
                 }
             }
-            ScheduleSettings? scheduleSettings = _configuration.GetSection("Schedule").Get<ScheduleSettings>();
-            services.AddSingleton(x => scheduleSettings);
             services.AddSingleton(x => commandOptions);
-            services.AddSingleton<SchedulerService>();
             HandBrakeSettings? handBrakeSettings = _configuration.GetSection("HandBrake").Get<HandBrakeSettings>();
             services.AddSingleton(x => handBrakeSettings);
             services.AddSingleton(x => { return new HandBrakeCli(handBrakeSettings.HandBrakeCliPath); });

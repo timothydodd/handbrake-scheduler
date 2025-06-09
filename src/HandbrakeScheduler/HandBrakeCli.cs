@@ -180,6 +180,59 @@ namespace HandbrakeScheduler
             process.BeginOutputReadLine();
             return await tcs.Task;
         }
+ /// <summary>
+        /// Gets the HandBrake CLI version
+        /// </summary>
+        /// <returns>The version string of HandBrake CLI</returns>
+        /// <exception cref="HandbrakeCliWrapperException">Thrown when HandBrake CLI is not found or version cannot be retrieved</exception>
+        public async Task<string> GetVersionAsync()
+        {
+            if (!File.Exists(_cliPath))
+            {
+                throw new HandbrakeCliWrapperException($"HandBrake CLI not found at path: {_cliPath}");
+            }
+
+            try
+            {
+                var process = new Process
+                {
+                    StartInfo = new ProcessStartInfo(_cliPath, "--version")
+                    {
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true,
+                        UseShellExecute = false,
+                        CreateNoWindow = true
+                    }
+                };
+
+                process.Start();
+                
+                string output = await process.StandardOutput.ReadToEndAsync();
+                string error = await process.StandardError.ReadToEndAsync();
+                
+                await process.WaitForExitAsync();
+
+                if (process.ExitCode != 0)
+                {
+                    throw new HandbrakeCliWrapperException($"Failed to get HandBrake version. Exit code: {process.ExitCode}. Error: {error}");
+                }
+
+                // HandBrake typically outputs version info to stdout
+                // Example output: "HandBrake 1.6.1 (2023010400)"
+                string version = !string.IsNullOrWhiteSpace(output) ? output.Trim() : error.Trim();
+                
+                if (string.IsNullOrWhiteSpace(version))
+                {
+                    throw new HandbrakeCliWrapperException("Unable to parse HandBrake version from output");
+                }
+
+                return version;
+            }
+            catch (Exception ex) when (!(ex is HandbrakeCliWrapperException))
+            {
+                throw new HandbrakeCliWrapperException($"Error retrieving HandBrake version: {ex.Message}", ex);
+            }
+        }
 
         public void StopTranscoding()
         {
