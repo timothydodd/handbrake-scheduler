@@ -1,6 +1,6 @@
 # HandBrake Encoding Scheduler
 
-This .NET 8 application is designed to schedule and automate video encoding using HandBrakeCLI. It allows you to specify the input folders, output locations, encoding presets, and schedule encoding during specific parts of the day.
+This .NET 89 application is designed to schedule and automate video encoding using HandBrakeCLI. It allows you to specify the input folders, output locations, encoding presets, and schedule encoding during specific parts of the day.
 
 
 ## Features

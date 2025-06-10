@@ -1,5 +1,4 @@
-﻿using System.Diagnostics.CodeAnalysis;
-using Microsoft.Extensions.Logging;
+﻿using Microsoft.Extensions.Logging;
 using ShellProgressBar;
 
 namespace HandbrakeScheduler
@@ -7,80 +6,104 @@ namespace HandbrakeScheduler
     internal class HandBrakeService
     {
         private readonly HandBrakeCli _cli;
-        private readonly HandBrakeSettings _settings;
-        private readonly CommandOptions _commandOptions;
         private readonly ILogger<HandBrakeService> _logger;
-        public HandBrakeService(
 
+        public HandBrakeService(
             HandBrakeCli cli,
-            HandBrakeSettings settings, CommandOptions commandOptions, ILogger<HandBrakeService> logger)
+            ILogger<HandBrakeService> logger)
         {
             _cli = cli;
             _logger = logger;
-            _commandOptions = commandOptions;
-            _settings = settings;
         }
 
-
-        public async Task DoWork()
+        public async Task ProcessSingleJob(TranscodeJob job, TempFileManager tempFileManager, CancellationToken cancellationToken = default)
         {
+            string workingFilePath = job.InputPath;
+            bool usedTempFile = false;
 
-            _logger.LogInformation("Started Work");
-            string version = await _cli.GetVersionAsync();
-            Console.WriteLine($"HandBrake Version: {version}");
-            DateTime startTime = DateTime.Now;
-            foreach (FolderSetting folder in _settings.Folders)
+            try
             {
+                _logger.LogInformation("Processing job: {FileName}", job.FileName);
+
+                // Check if we should use temp file for remote sources
+                if (job.IsRemoteSource && tempFileManager.HasSufficientSpace(job.FileSizeBytes))
+                {
+                    _logger.LogInformation("Copying remote file to temp location: {FileName}", job.FileName);
+
+                    var copyProgress = new Progress<double>(percent =>
+                    {
+                        if (percent % 10 < 1) // Log every 10%
+                        {
+                            _logger.LogInformation("Copy progress for {FileName}: {Percent:F1}%", job.FileName, percent);
+                        }
+                    });
+
+                    workingFilePath = await tempFileManager.CopyToTempAsync(job.InputPath, copyProgress, cancellationToken);
+                    job.TempFilePath = workingFilePath;
+                    usedTempFile = true;
+                }
+                else if (job.IsRemoteSource)
+                {
+                    _logger.LogWarning("Insufficient disk space for temp copy of {FileName}. Processing directly from network.", job.FileName);
+                }
+
+                // Ensure output directory exists
+                if (!Directory.Exists(job.OutputDirectory))
+                {
+                    Directory.CreateDirectory(job.OutputDirectory);
+                }
+
+                ProgressBar bar = new(100, "Transcoding " + job.FileName, new ProgressBarOptions
+                {
+                    ForegroundColor = ConsoleColor.Yellow,
+                    BackgroundColor = ConsoleColor.DarkGray,
+                    ProgressCharacter = '─'
+                });
+
                 try
                 {
-                    if (Directory.Exists(folder.InputPath) == false)
+                    await _cli.Transcode(workingFilePath, job.OutputDirectory, job.Preset, (s) =>
                     {
-                        _logger.LogWarning("Folder {folder} does not exist", folder.InputPath);
-                        continue;
-                    }
-                    IEnumerable<string> files = FindVideos(folder.InputPath, folder.FileExtensions);
-                    foreach (string f in files)
+                        if (!cancellationToken.IsCancellationRequested)
+                        {
+                            bar.Tick((int)s.Percentage, s.Estimated, $"{job.FileName} - AverageFps: {s.AverageFps}");
+                        }
+                    }, true, job.DeleteSource && !usedTempFile); // Only delete source if not using temp file
+
+                    _logger.LogInformation("Successfully processed job: {FileName}", job.FileName);
+
+                    // If we used a temp file and original should be deleted, delete the original
+                    if (usedTempFile && job.DeleteSource)
                     {
-                        string inputNestedPath = Path.GetDirectoryName(f).Replace(folder.InputPath, "", StringComparison.InvariantCultureIgnoreCase);
-
-                        string outputDirectory = Path.Combine(folder.OutputPath, inputNestedPath);
-                        string fileName = Path.GetFileName(f);
-                        ProgressBar bar = new(100, "Transcoding " + f, new ProgressBarOptions
+                        try
                         {
-                            ForegroundColor =
-                            ConsoleColor.Yellow,
-                            BackgroundColor = ConsoleColor.DarkGray,
-                            ProgressCharacter = '─'
-                        });
-                        await _cli.Transcode(f, outputDirectory, folder.Preset, (s) =>
+                            File.Delete(job.InputPath);
+                            _logger.LogInformation("Deleted original file: {FileName}", job.FileName);
+                        }
+                        catch (Exception ex)
                         {
-                            bar.Tick((int)s.Percentage, s.Estimated, $"{fileName} - AverageFps: {s.AverageFps}");
-                        }, true, folder.DeleteSource);
-
-
-
+                            _logger.LogWarning(ex, "Could not delete original file: {FileName}", job.FileName);
+                        }
                     }
                 }
-                catch (Exception ex)
+                finally
                 {
-                    _logger.LogError(ex, "Error Processing Folder {folder}", folder.InputPath);
+                    bar.Dispose();
                 }
-
-
-
             }
-            _logger.LogInformation("Finished Work");
-
-
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error processing job: {FileName}", job.FileName);
+                throw;
+            }
+            finally
+            {
+                // Clean up temp file if we used one
+                if (usedTempFile && !string.IsNullOrEmpty(job.TempFilePath))
+                {
+                    tempFileManager.CleanupTempFile(job.TempFilePath);
+                }
+            }
         }
-
-        private IEnumerable<string> FindVideos(string folder, string[] extensions)
-        {
-
-            return
-                Directory.EnumerateFiles(folder, "*.*", SearchOption.AllDirectories)
-                .Where(s => extensions.Contains(Path.GetExtension(s), StringComparer.InvariantCultureIgnoreCase));
-        }
-     
     }
 }

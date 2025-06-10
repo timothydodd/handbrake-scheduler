@@ -1,109 +1,100 @@
-﻿using CommandLine;
+﻿using System.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using System.Diagnostics;
-using System.Diagnostics.CodeAnalysis;
 
 namespace HandbrakeScheduler
 {
     internal class Program
     {
-        private static ServiceProvider? _serviceProvider = null;
-
-        private static IConfigurationRoot? _configuration;
-
-     
         private static async Task Main(string[] args)
         {
             KillAllHandBrakeCli();
-            Configure(args);
-            AppDomain.CurrentDomain.ProcessExit += new EventHandler(CurrentDomain_ProcessExit);
 
-            Console.WriteLine("..enter Ctrl+C or Ctrl+Break to exit..");
-
-            HandBrakeService? importer = _serviceProvider.GetService<HandBrakeService>();
-
-            ILogger<Program>? logger = _serviceProvider.GetService<ILogger<Program>>();
-
-            Console.CancelKeyPress +=
-                new ConsoleCancelEventHandler((a, b) =>
-                {
-
-                    logger.LogInformation("HandbrakeScheduler Shutting Down");
-                    Environment.Exit(0);
-                });
-
-
-
-            await importer.DoWork();
-
-        }
-       
-        private static void Configure(string[] args)
-        {
             IConfigurationBuilder builder = new ConfigurationBuilder()
-                .SetBasePath(Directory.GetCurrentDirectory())
-                .AddJsonFile("appsettings.json", optional: true, reloadOnChange: true)
-                .AddEnvironmentVariables();
+                .SetBasePath(Directory.GetCurrentDirectory());
 
+            IConfiguration configuration = builder.Build();
 
-#if DEBUG
-            builder = builder.AddUserSecrets<Program>();
-#endif
-            _configuration = builder.Build();
-
-
-
-            IServiceCollection services = new ServiceCollection()
-                .AddSingleton<IServiceProvider>(c => _serviceProvider);
-            ParserResult<CommandOptions> results = Parser.Default.ParseArguments<CommandOptions>(args);
-            CommandOptions commandOptions = new();
-            if (results.Tag == ParserResultType.Parsed)
-            {
-                CommandOptions? options = (results as Parsed<CommandOptions>)?.Value;
-                if (options != null)
+            var host = Host.CreateDefaultBuilder(args)
+                .ConfigureAppConfiguration((context, config) =>
                 {
-                    commandOptions = options;
-                    Console.WriteLine("Scheduler Mode: " + commandOptions.SchedulerMode.ToString());
-                }
-            }
-            services.AddSingleton(x => commandOptions);
-            HandBrakeSettings? handBrakeSettings = _configuration.GetSection("HandBrake").Get<HandBrakeSettings>();
-            services.AddSingleton(x => handBrakeSettings);
-            services.AddSingleton(x => { return new HandBrakeCli(handBrakeSettings.HandBrakeCliPath); });
-            services.AddLogging((loggingBuilder) =>
+                    config.AddConfiguration(configuration);
+                    config.AddEnvironmentVariables();
+                    // Optionally add command line arguments if needed
+                    if (args != null && args.Length > 0)
+                    {
+                        config.AddCommandLine(args);
+                    }
+                    // Add user secrets in development mode
+#if DEBUG
+                    config.AddUserSecrets<Program>();
+#endif
+                })
+                .ConfigureServices((context, services) =>
+                {
+                    // Parse command line arguments
+
+
+                    // Bind HandBrake settings
+                    var handBrakeSettings = new HandBrakeSettings();
+                    context.Configuration.GetSection("HandBrake").Bind(handBrakeSettings);
+                    services.AddSingleton(handBrakeSettings);
+
+
+
+                    // Register HandBrakeCli
+                    services.AddSingleton(provider =>
+                    {
+                        var settings = provider.GetService<HandBrakeSettings>();
+                        return new HandBrakeCli(settings.HandBrakeCliPath);
+                    });
+
+                    // Register services
+                    services.AddSingleton<HandBrakeService>();
+                    services.AddSingleton<JobQueue>();
+                    services.AddSingleton<TempFileManager>();
+
+                    // Register the hosted service
+                    services.AddHostedService<HandBrakeMonitoringService>();
+                })
+                .ConfigureLogging(logging =>
+                {
+                    logging.ClearProviders();
+                    logging.AddConsole();
+                    logging.AddFile(o => o.RootPath = AppContext.BaseDirectory);
+                    logging.SetMinimumLevel(LogLevel.Information);
+                })
+                .Build();
+
+            // Setup process exit handler
+            AppDomain.CurrentDomain.ProcessExit += (sender, e) =>
             {
-                loggingBuilder.AddConfiguration(_configuration.GetSection("Logging"));
-                loggingBuilder
-                    .SetMinimumLevel(LogLevel.Trace)
-                    .AddConsole()
-                    .AddFile(o => o.RootPath = AppContext.BaseDirectory);
-            });
-            services.AddSingleton<HandBrakeService>();
+                var cli = host.Services.GetService<HandBrakeCli>();
+                cli?.StopTranscoding();
+                KillAllHandBrakeCli();
+            };
 
+            Console.WriteLine("Starting HandBrake monitoring service...");
+            Console.WriteLine("Press Ctrl+C to stop the service.");
 
-            _serviceProvider = services.BuildServiceProvider();
-
-
+            await host.RunAsync();
         }
+
         private static void KillAllHandBrakeCli()
         {
             foreach (Process node in Process.GetProcessesByName("HandBrakeCli"))
             {
-                try { node.Kill(); }
+                try
+                {
+                    node.Kill();
+                }
                 catch (Exception ex)
                 {
-                    Console.WriteLine(ex.Message);
+                    Console.WriteLine($"Error killing HandBrakeCli process: {ex.Message}");
                 }
-
             }
-        }
-        private static void CurrentDomain_ProcessExit(object sender, EventArgs e)
-        {
-            HandBrakeCli? cli = _serviceProvider.GetService<HandBrakeCli>();
-            cli.StopTranscoding();
-            KillAllHandBrakeCli();
         }
     }
 }

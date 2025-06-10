@@ -41,6 +41,7 @@ namespace HandbrakeScheduler
                 throw new HandbrakeCliWrapperException($"The input file '{inputFile}' could not be found");
             }
 
+
             if (Status.Converting)
             {
                 throw new HandbrakeCliWrapperException("A conversion is already running");
@@ -180,7 +181,7 @@ namespace HandbrakeScheduler
             process.BeginOutputReadLine();
             return await tcs.Task;
         }
- /// <summary>
+        /// <summary>
         /// Gets the HandBrake CLI version
         /// </summary>
         /// <returns>The version string of HandBrake CLI</returns>
@@ -206,10 +207,10 @@ namespace HandbrakeScheduler
                 };
 
                 process.Start();
-                
+
                 string output = await process.StandardOutput.ReadToEndAsync();
                 string error = await process.StandardError.ReadToEndAsync();
-                
+
                 await process.WaitForExitAsync();
 
                 if (process.ExitCode != 0)
@@ -220,7 +221,7 @@ namespace HandbrakeScheduler
                 // HandBrake typically outputs version info to stdout
                 // Example output: "HandBrake 1.6.1 (2023010400)"
                 string version = !string.IsNullOrWhiteSpace(output) ? output.Trim() : error.Trim();
-                
+
                 if (string.IsNullOrWhiteSpace(version))
                 {
                     throw new HandbrakeCliWrapperException("Unable to parse HandBrake version from output");
@@ -270,21 +271,7 @@ namespace HandbrakeScheduler
         }
     }
 
-    public class HandBrakeSettings
-    {
-        public required string HandBrakeCliPath { get; set; }
-        public required List<FolderSetting> Folders { get; set; }
 
-    }
-    public class FolderSetting
-    {
-        public required string InputPath { get; set; }
-        public string Preset { get; set; } = "HQ 1080p30 Surround";
-        public required string OutputPath { get; set; }
-        public bool PreserveFolderStructure { get; set; } = true;
-        public bool DeleteSource { get; set; } = true;
-        public required string[] FileExtensions { get; set; }
-    }
     public class HandbrakeTranscodingEventArgs : EventArgs
     {
         public HandbrakeTranscodingEventArgs(string inputFilename)
