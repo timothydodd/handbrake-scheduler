@@ -29,13 +29,18 @@ namespace HandbrakeScheduler
                 if (job.IsRemoteSource && tempFileManager.HasSufficientSpace(job.FileSizeBytes))
                 {
                     _logger.LogInformation("Copying remote file to temp location: {FileName}", job.FileName);
+                    ProgressBar bar2 = new(100, $"Copying remote file to temp location: {job.FileName}", new ProgressBarOptions
+                    {
+                        ForegroundColor = ConsoleColor.Magenta,
+                        BackgroundColor = ConsoleColor.DarkGray,
+                        ProgressCharacter = '─'
+                    });
 
                     var copyProgress = new Progress<double>(percent =>
                     {
-                        if (percent % 10 < 1) // Log every 10%
-                        {
-                            _logger.LogInformation("Copy progress for {FileName}: {Percent:F1}%", job.FileName, percent);
-                        }
+
+                        bar2.Tick((int)percent, $"Copy progress for {job.FileName}");
+
                     });
 
                     workingFilePath = await tempFileManager.CopyToTempAsync(job.InputPath, copyProgress, cancellationToken);
@@ -53,7 +58,7 @@ namespace HandbrakeScheduler
                     Directory.CreateDirectory(job.OutputDirectory);
                 }
 
-                ProgressBar bar = new(100, "Transcoding " + job.FileName, new ProgressBarOptions
+                ProgressBar bar = new(100, $"Transcoding {job.FileName}", new ProgressBarOptions
                 {
                     ForegroundColor = ConsoleColor.Yellow,
                     BackgroundColor = ConsoleColor.DarkGray,
