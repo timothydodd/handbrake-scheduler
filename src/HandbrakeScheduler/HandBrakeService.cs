@@ -67,7 +67,9 @@ namespace HandbrakeScheduler
 
                 try
                 {
-                    await _cli.Transcode(workingFilePath, job.OutputDirectory, job.Preset, (s) =>
+
+
+                    var resultFile = await _cli.Transcode(workingFilePath, Path.GetTempPath(), job.Preset, (s) =>
                     {
                         if (!cancellationToken.IsCancellationRequested)
                         {
@@ -76,6 +78,36 @@ namespace HandbrakeScheduler
                     }, true, job.DeleteSource && !usedTempFile); // Only delete source if not using temp file
 
                     _logger.LogInformation("Successfully processed job: {FileName}", job.FileName);
+
+                    if (resultFile == null)
+                    {
+                        _logger.LogError("Transcoding failed for {FileName}. Result file is null.", job.FileName);
+                        throw new InvalidOperationException($"Transcoding failed for {job.FileName}. Result file is null.");
+                    }
+                    ProgressBar bar3 = new(100, $"Copying remote file to temp location: {job.FileName}", new ProgressBarOptions
+                    {
+                        ForegroundColor = ConsoleColor.Magenta,
+                        BackgroundColor = ConsoleColor.DarkGray,
+                        ProgressCharacter = '─'
+                    });
+
+                    var copyProgress = new Progress<double>(percent =>
+                    {
+
+                        bar3.Tick((int)percent, $"Copy progress for {job.FileName}");
+
+                    });
+
+                    var resultFileName = Path.GetFileName(resultFile);
+                    await tempFileManager.CopyFileAsync(resultFile, Path.Combine(job.OutputDirectory, resultFileName), copyProgress, cancellationToken);
+
+                    _logger.LogInformation("Copied result file to output directory: {OutputDirectory}", job.OutputDirectory);
+                    //delete temp file
+                    if (File.Exists(resultFile))
+                        File.Delete(resultFile); // Delete the temp result file after copying
+
+                    //copy the result file to the output directory
+
 
                     // If we used a temp file and original should be deleted, delete the original
                     if (usedTempFile && job.DeleteSource)

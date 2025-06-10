@@ -71,8 +71,15 @@ namespace HandbrakeScheduler
             // Setup process exit handler
             AppDomain.CurrentDomain.ProcessExit += (sender, e) =>
             {
-                var cli = host.Services.GetService<HandBrakeCli>();
-                cli?.StopTranscoding();
+                try
+                {
+                    var cli = host.Services.GetService<HandBrakeCli>();
+                    cli?.StopTranscoding();
+                }
+                catch
+                {
+
+                }
                 KillAllHandBrakeCli();
             };
 

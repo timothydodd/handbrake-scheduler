@@ -13,13 +13,46 @@ namespace HandbrakeScheduler
         public TempFileManager(HandBrakeSettings handBrakeSettings, ILogger<TempFileManager> logger)
         {
             _logger = logger;
-            _tempBasePath = Path.Combine(handBrakeSettings.TempFolder, "HandBrakeTemp");
+            _tempBasePath = Path.GetTempPath();
 
             // Ensure temp directory exists
             if (!Directory.Exists(_tempBasePath))
             {
                 Directory.CreateDirectory(_tempBasePath);
                 _logger.LogInformation("Created temp directory: {TempPath}", _tempBasePath);
+            }
+        }
+
+        public async Task CopyFileAsync(string sourcePath, string destinationPath, IProgress<double>? progress = null, CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                _logger.LogInformation("Copying file from {SourcePath} to {DestinationPath}", sourcePath, destinationPath);
+                var sourceInfo = new FileInfo(sourcePath);
+                long totalBytes = sourceInfo.Length;
+                long copiedBytes = 0;
+                using var sourceStream = new FileStream(sourcePath, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize: 8192);
+                using var destStream = new FileStream(destinationPath, FileMode.Create, FileAccess.Write, FileShare.None, bufferSize: 8192);
+                byte[] buffer = new byte[8192];
+                int bytesRead;
+                while ((bytesRead = await sourceStream.ReadAsync(buffer, 0, buffer.Length, cancellationToken)) > 0)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    await destStream.WriteAsync(buffer, 0, bytesRead, cancellationToken);
+                    copiedBytes += bytesRead;
+                    // Report progress
+                    if (progress != null && totalBytes > 0)
+                    {
+                        double progressPercent = (double)copiedBytes / totalBytes * 100;
+                        progress.Report(progressPercent);
+                    }
+                }
+                _logger.LogInformation("Successfully copied file to {DestinationPath}", destinationPath);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error copying file from {SourcePath} to {DestinationPath}", sourcePath, destinationPath);
+                throw;
             }
         }
 
@@ -31,32 +64,7 @@ namespace HandbrakeScheduler
                 var tempFileName = $"{Guid.NewGuid()}_{fileName}";
                 var tempPath = Path.Combine(_tempBasePath, tempFileName);
 
-                _logger.LogInformation("Copying {FileName} to temp location for transcoding", fileName);
-
-                var sourceInfo = new FileInfo(sourcePath);
-                long totalBytes = sourceInfo.Length;
-                long copiedBytes = 0;
-
-                using var sourceStream = new FileStream(sourcePath, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize: 8192);
-                using var destStream = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None, bufferSize: 8192);
-
-                byte[] buffer = new byte[8192];
-                int bytesRead;
-
-                while ((bytesRead = await sourceStream.ReadAsync(buffer, 0, buffer.Length, cancellationToken)) > 0)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-
-                    await destStream.WriteAsync(buffer, 0, bytesRead, cancellationToken);
-                    copiedBytes += bytesRead;
-
-                    // Report progress
-                    if (progress != null && totalBytes > 0)
-                    {
-                        double progressPercent = (double)copiedBytes / totalBytes * 100;
-                        progress.Report(progressPercent);
-                    }
-                }
+                await CopyFileAsync(sourcePath, tempPath, progress, cancellationToken);
 
                 // Track temp file for cleanup
                 lock (_lock)

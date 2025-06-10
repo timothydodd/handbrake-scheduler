@@ -11,8 +11,6 @@
         public TimeOnly? EndTime { get; set; }
         public string? Username { get; set; }
         public string? Password { get; set; }
-        public string TempFolder { get; set; } = Path.GetTempPath();
-        public bool UseTemp { get; set; } = true;
     }
 
     public class FolderSetting

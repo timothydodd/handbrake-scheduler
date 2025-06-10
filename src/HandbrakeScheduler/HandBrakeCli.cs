@@ -34,7 +34,7 @@ namespace HandbrakeScheduler
         {
             _cliPath = cliPath;
         }
-        public async Task Transcode(string inputFile, string outputDirectory, string preset, Action<HandbrakeConversionStatus> status, bool overwriteExisting = true, bool deletesource = true)
+        public async Task<string?> Transcode(string inputFile, string outputDirectory, string preset, Action<HandbrakeConversionStatus> status, bool overwriteExisting = true, bool deletesource = true)
         {
             if (!File.Exists(inputFile))
             {
@@ -48,7 +48,7 @@ namespace HandbrakeScheduler
             }
             _status = status;
 
-            _ = Directory.CreateDirectory(outputDirectory);
+
             string ext = $".mp4";
             string outputFilename = "";
 
@@ -108,11 +108,13 @@ namespace HandbrakeScheduler
                         throw new HandbrakeCliWrapperException($"Could not remove original '{inputFile}'", e);
                     }
                 }
+                return outputFilename;
             }
             else
             {
                 ErrorTranscoding();
             }
+            return null;
         }
         private void StartedTranscoding(string inputFile, string outputFile)
         {
