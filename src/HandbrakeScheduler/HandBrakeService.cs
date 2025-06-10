@@ -8,9 +8,7 @@ namespace HandbrakeScheduler
         private readonly HandBrakeCli _cli;
         private readonly ILogger<HandBrakeService> _logger;
 
-        public HandBrakeService(
-            HandBrakeCli cli,
-            ILogger<HandBrakeService> logger)
+        public HandBrakeService(HandBrakeCli cli, ILogger<HandBrakeService> logger)
         {
             _cli = cli;
             _logger = logger;
@@ -25,108 +23,33 @@ namespace HandbrakeScheduler
             {
                 _logger.LogInformation("Processing job: {FileName}", job.FileName);
 
-                // Check if we should use temp file for remote sources
-                if (job.IsRemoteSource && tempFileManager.HasSufficientSpace(job.FileSizeBytes))
+                // Handle remote file copying if needed
+                if (job.IsRemoteSource)
                 {
-                    _logger.LogInformation("Copying remote file to temp location: {FileName}", job.FileName);
-                    ProgressBar bar2 = new(100, $"Copying remote file to temp location: {job.FileName}", new ProgressBarOptions
-                    {
-                        ForegroundColor = ConsoleColor.Magenta,
-                        BackgroundColor = ConsoleColor.DarkGray,
-                        ProgressCharacter = '─'
-                    });
-
-                    var copyProgress = new Progress<double>(percent =>
-                    {
-
-                        bar2.Tick((int)percent, $"Copy progress for {job.FileName}");
-
-                    });
-
-                    workingFilePath = await tempFileManager.CopyToTempAsync(job.InputPath, copyProgress, cancellationToken);
-                    job.TempFilePath = workingFilePath;
-                    usedTempFile = true;
-                }
-                else if (job.IsRemoteSource)
-                {
-                    _logger.LogWarning("Insufficient disk space for temp copy of {FileName}. Processing directly from network.", job.FileName);
+                    var tempResult = await HandleRemoteFile(job, tempFileManager, cancellationToken);
+                    workingFilePath = tempResult.FilePath;
+                    usedTempFile = tempResult.UsedTemp;
                 }
 
                 // Ensure output directory exists
-                if (!Directory.Exists(job.OutputDirectory))
+                Directory.CreateDirectory(job.OutputDirectory);
+
+                // Perform transcoding
+                var resultFile = await PerformTranscoding(job, workingFilePath, usedTempFile, cancellationToken);
+
+                // Copy result to output directory
+                await CopyResultToOutput(job, resultFile, tempFileManager, cancellationToken);
+
+                // Clean up temporary result file
+                DeleteFileIfExists(resultFile);
+
+                // Delete original source if requested and we used a temp file
+                if (usedTempFile && job.DeleteSource)
                 {
-                    Directory.CreateDirectory(job.OutputDirectory);
+                    DeleteOriginalFile(job);
                 }
 
-                ProgressBar bar = new(100, $"Transcoding {job.FileName}", new ProgressBarOptions
-                {
-                    ForegroundColor = ConsoleColor.Yellow,
-                    BackgroundColor = ConsoleColor.DarkGray,
-                    ProgressCharacter = '─'
-                });
-
-                try
-                {
-
-
-                    var resultFile = await _cli.Transcode(workingFilePath, Path.GetTempPath(), job.Preset, (s) =>
-                    {
-                        if (!cancellationToken.IsCancellationRequested)
-                        {
-                            bar.Tick((int)s.Percentage, s.Estimated, $"{job.FileName} - AverageFps: {s.AverageFps}");
-                        }
-                    }, true, job.DeleteSource && !usedTempFile); // Only delete source if not using temp file
-
-                    _logger.LogInformation("Successfully processed job: {FileName}", job.FileName);
-
-                    if (resultFile == null)
-                    {
-                        _logger.LogError("Transcoding failed for {FileName}. Result file is null.", job.FileName);
-                        throw new InvalidOperationException($"Transcoding failed for {job.FileName}. Result file is null.");
-                    }
-                    ProgressBar bar3 = new(100, $"Copying remote file to temp location: {job.FileName}", new ProgressBarOptions
-                    {
-                        ForegroundColor = ConsoleColor.Magenta,
-                        BackgroundColor = ConsoleColor.DarkGray,
-                        ProgressCharacter = '─'
-                    });
-
-                    var copyProgress = new Progress<double>(percent =>
-                    {
-
-                        bar3.Tick((int)percent, $"Copy progress for {job.FileName}");
-
-                    });
-
-                    var resultFileName = Path.GetFileName(resultFile);
-                    await tempFileManager.CopyFileAsync(resultFile, Path.Combine(job.OutputDirectory, resultFileName), copyProgress, cancellationToken);
-
-                    _logger.LogInformation("Copied result file to output directory: {OutputDirectory}", job.OutputDirectory);
-                    //delete temp file
-                    if (File.Exists(resultFile))
-                        File.Delete(resultFile); // Delete the temp result file after copying
-
-                    //copy the result file to the output directory
-
-
-                    // If we used a temp file and original should be deleted, delete the original
-                    if (usedTempFile && job.DeleteSource)
-                    {
-                        try
-                        {
-                            File.Delete(job.InputPath);
-                            _logger.LogInformation("Deleted original file: {FileName}", job.FileName);
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogWarning(ex, "Could not delete original file: {FileName}", job.FileName);
-                        }
-                    }
-                }
-                finally
-                {
-                    bar.Dispose();
-                }
+                _logger.LogInformation("Successfully processed job: {FileName}", job.FileName);
             }
             catch (Exception ex)
             {
@@ -140,6 +63,123 @@ namespace HandbrakeScheduler
                 {
                     tempFileManager.CleanupTempFile(job.TempFilePath);
                 }
+            }
+        }
+
+        private async Task<(string FilePath, bool UsedTemp)> HandleRemoteFile(
+            TranscodeJob job,
+            TempFileManager tempFileManager,
+            CancellationToken cancellationToken)
+        {
+            if (tempFileManager.HasSufficientSpace(job.FileSizeBytes))
+            {
+                _logger.LogInformation("Copying remote file to temp location: {FileName}", job.FileName);
+
+                using var progressBar = CreateProgressBar($"Copying {job.FileName}", ConsoleColor.Magenta);
+                var copyProgress = CreateProgressReporter(progressBar, job.FileName, "Copy progress");
+
+                var tempPath = await tempFileManager.CopyToTempAsync(job.InputPath, copyProgress, cancellationToken);
+                job.TempFilePath = tempPath;
+
+                return (tempPath, true);
+            }
+            else
+            {
+                _logger.LogWarning("Insufficient disk space for temp copy of {FileName}. Processing directly from network.", job.FileName);
+                return (job.InputPath, false);
+            }
+        }
+
+        private async Task<string> PerformTranscoding(
+            TranscodeJob job,
+            string workingFilePath,
+            bool usedTempFile,
+            CancellationToken cancellationToken)
+        {
+            using var progressBar = CreateProgressBar($"Transcoding {job.FileName}", ConsoleColor.Yellow);
+
+            var resultFile = await _cli.Transcode(
+                workingFilePath,
+                Path.GetTempPath(),
+                job.Preset,
+                status => UpdateTranscodingProgress(progressBar, status, job, cancellationToken),
+                true,
+                job.DeleteSource && !usedTempFile);
+
+            if (resultFile == null)
+            {
+                throw new InvalidOperationException($"Transcoding failed for {job.FileName}. Result file is null.");
+            }
+
+            return resultFile;
+        }
+
+        private async Task CopyResultToOutput(
+            TranscodeJob job,
+            string resultFile,
+            TempFileManager tempFileManager,
+            CancellationToken cancellationToken)
+        {
+            using var progressBar = CreateProgressBar($"Copying result for {job.FileName}", ConsoleColor.Magenta);
+            var copyProgress = CreateProgressReporter(progressBar, job.FileName, "Copy progress");
+
+            var resultFileName = FileUtil.GetFileNameWithNewExtension(job.FileName, ".mp4");
+            var outputPath = Path.Combine(job.OutputDirectory, resultFileName);
+
+            await tempFileManager.CopyFileAsync(resultFile, outputPath, copyProgress, cancellationToken);
+
+            _logger.LogInformation("Copied result file to output directory: {OutputDirectory}", job.OutputDirectory);
+        }
+
+        private void DeleteOriginalFile(TranscodeJob job)
+        {
+            try
+            {
+                File.Delete(job.InputPath);
+                _logger.LogInformation("Deleted original file: {FileName}", job.FileName);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Could not delete original file: {FileName}", job.FileName);
+            }
+        }
+
+        private static void DeleteFileIfExists(string filePath)
+        {
+            if (File.Exists(filePath))
+            {
+                File.Delete(filePath);
+            }
+        }
+
+        private static ProgressBar CreateProgressBar(string message, ConsoleColor color)
+        {
+            return new ProgressBar(100, message, new ProgressBarOptions
+            {
+                ForegroundColor = color,
+                BackgroundColor = ConsoleColor.DarkGray,
+                ProgressCharacter = '─'
+            });
+        }
+
+        private static Progress<double> CreateProgressReporter(ProgressBar progressBar, string fileName, string operation)
+        {
+            return new Progress<double>(percent =>
+            {
+                progressBar.Tick((int)percent, $"{operation} for {fileName}");
+            });
+        }
+
+        private static void UpdateTranscodingProgress(
+            ProgressBar progressBar,
+            dynamic status,
+            TranscodeJob job,
+            CancellationToken cancellationToken)
+        {
+            if (!cancellationToken.IsCancellationRequested)
+            {
+                progressBar.Tick((int)status.Percentage, status.Estimated,
+                    $"{job.FileName} - AverageFps: {status.AverageFps}");
             }
         }
     }

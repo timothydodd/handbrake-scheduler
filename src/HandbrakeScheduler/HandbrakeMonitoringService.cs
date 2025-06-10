@@ -10,9 +10,8 @@ namespace HandbrakeScheduler
         private readonly HandBrakeSettings _handBrakeSettings;
         private readonly JobQueue _jobQueue;
         private readonly ILogger<HandBrakeMonitoringService> _logger;
-        private readonly NetworkCredential? _networkCredential;
-
         private readonly TempFileManager _tempFileManager;
+        private readonly NetworkCredential? _networkCredential;
 
         public HandBrakeMonitoringService(
             HandBrakeService handBrakeService,
@@ -27,7 +26,12 @@ namespace HandbrakeScheduler
             _tempFileManager = tempFileManager;
             _logger = logger;
 
-
+            // Initialize network credentials if provided
+            if (!string.IsNullOrEmpty(handBrakeSettings.Username) &&
+                !string.IsNullOrEmpty(handBrakeSettings.Password))
+            {
+                _networkCredential = new NetworkCredential(handBrakeSettings.Username, handBrakeSettings.Password);
+            }
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -37,21 +41,29 @@ namespace HandbrakeScheduler
             if (!_handBrakeSettings.MonitoringEnabled)
             {
                 _logger.LogInformation("Monitoring is disabled. Running single scan...");
-                ScanAndQueueJobs();
-                await ProcessJobs(stoppingToken);
+                await RunSingleScan(stoppingToken);
                 return;
             }
 
+            await RunMonitoringLoop(stoppingToken);
+        }
+
+        private async Task RunSingleScan(CancellationToken stoppingToken)
+        {
+            ScanAndQueueJobs();
+            await ProcessJobs(stoppingToken);
+        }
+
+        private async Task RunMonitoringLoop(CancellationToken stoppingToken)
+        {
             while (!stoppingToken.IsCancellationRequested)
             {
                 try
                 {
                     _logger.LogInformation("Starting monitoring cycle");
 
-                    // Scan for new files every 10 minutes
                     ScanAndQueueJobs();
 
-                    // Check if we're in the allowed time window
                     if (IsInAllowedTimeWindow())
                     {
                         _logger.LogInformation("In allowed time window. Processing jobs...");
@@ -67,8 +79,7 @@ namespace HandbrakeScheduler
                     _logger.LogError(ex, "Error in monitoring cycle");
                 }
 
-                // Wait 10 minutes before next scan
-                await Task.Delay(TimeSpan.FromMinutes(10), stoppingToken);
+                await Task.Delay(TimeSpan.FromMinutes(_handBrakeSettings.ScanIntervalMinutes), stoppingToken);
             }
         }
 
@@ -78,45 +89,59 @@ namespace HandbrakeScheduler
             {
                 try
                 {
-                    using var networkConnection = ConnectToNetworkPath(folder.InputPath);
-
-                    if (!Directory.Exists(folder.InputPath))
-                    {
-                        _logger.LogWarning("Folder {InputPath} does not exist", folder.InputPath);
-                        continue;
-                    }
-
-                    var files = FindVideos(folder.InputPath, folder.FileExtensions);
-
-                    foreach (var file in files)
-                    {
-                        string inputNestedPath = Path.GetDirectoryName(file)
-                            ?.Replace(folder.InputPath, "", StringComparison.InvariantCultureIgnoreCase) ?? "";
-                        string outputDirectory = Path.Combine(folder.OutputPath, inputNestedPath);
-
-                        var fileInfo = new FileInfo(file);
-                        bool isRemote = folder.CopyInputToTempFolder || IsNetworkPath(file);
-
-                        var job = new TranscodeJob
-                        {
-                            InputPath = file,
-                            OutputDirectory = outputDirectory,
-                            Preset = folder.Preset,
-                            DeleteSource = folder.DeleteSource,
-                            IsRemoteSource = isRemote,
-                            FileSizeBytes = fileInfo.Length
-                        };
-
-                        _jobQueue.EnqueueJob(job);
-                        _logger.LogInformation("Queued job for: {FileName} ({FileSize} MB) - Remote: {IsRemote}",
-                            job.FileName, job.FileSizeBytes / 1024 / 1024, isRemote);
-                    }
+                    ScanFolder(folder);
                 }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Error scanning folder {InputPath}", folder.InputPath);
                 }
             }
+        }
+
+        private void ScanFolder(FolderSetting folder)
+        {
+            using var networkConnection = ConnectToNetworkPath(folder.InputPath);
+
+            if (!Directory.Exists(folder.InputPath))
+            {
+                _logger.LogWarning("Folder {InputPath} does not exist", folder.InputPath);
+                return;
+            }
+
+            var files = Directory.EnumerateFiles(folder.InputPath, "*.*",
+                    folder.RecursiveSearch ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly)
+                .Where(file =>
+                {
+                    var fileInfo = new FileInfo(file);
+                    return folder.ShouldProcessFile(fileInfo);
+                });
+
+            foreach (var file in files)
+            {
+                var job = CreateTranscodeJob(file, folder);
+                _jobQueue.EnqueueJob(job);
+
+                _logger.LogInformation("Queued job for: {FileName} ({FileSize} MB) - Remote: {IsRemote}",
+                    job.FileName, job.FileSizeBytes / 1024 / 1024, job.IsRemoteSource);
+            }
+        }
+
+        private TranscodeJob CreateTranscodeJob(string filePath, FolderSetting folder)
+        {
+            var relativePath = Path.GetDirectoryName(Path.GetRelativePath(folder.InputPath, filePath));
+            var outputDirectory = Path.Combine(folder.OutputPath, relativePath ?? string.Empty);
+            var fileInfo = new FileInfo(filePath);
+            var isRemote = folder.CopyInputToTempFolder || IsNetworkPath(filePath);
+
+            return new TranscodeJob
+            {
+                InputPath = filePath,
+                OutputDirectory = outputDirectory,
+                Preset = folder.Preset,
+                DeleteSource = folder.DeleteSource,
+                IsRemoteSource = isRemote,
+                FileSizeBytes = fileInfo.Length
+            };
         }
 
         private async Task ProcessJobs(CancellationToken stoppingToken)
@@ -164,20 +189,9 @@ namespace HandbrakeScheduler
             var endTime = _handBrakeSettings.EndTime.Value;
 
             // Handle time windows that span midnight
-            if (startTime <= endTime)
-            {
-                return currentTime >= startTime && currentTime <= endTime;
-            }
-            else
-            {
-                return currentTime >= startTime || currentTime <= endTime;
-            }
-        }
-
-        private IEnumerable<string> FindVideos(string folder, string[] extensions)
-        {
-            return Directory.EnumerateFiles(folder, "*.*", SearchOption.AllDirectories)
-                .Where(s => extensions.Contains(Path.GetExtension(s), StringComparer.InvariantCultureIgnoreCase));
+            return startTime <= endTime
+                ? currentTime >= startTime && currentTime <= endTime
+                : currentTime >= startTime || currentTime <= endTime;
         }
 
         private IDisposable? ConnectToNetworkPath(string path)
@@ -192,15 +206,7 @@ namespace HandbrakeScheduler
 
         private static bool IsNetworkPath(string path)
         {
-            // Check if Network path for mac
-
-
-
-            // Check for UNC paths (Windows) or network paths (Linux/Unix)
-
-
             return path.StartsWith(@"\\") || path.StartsWith("//");
-
         }
     }
 }

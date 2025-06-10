@@ -49,17 +49,11 @@ namespace HandbrakeScheduler
             _status = status;
 
 
-            string ext = $".mp4";
-            string outputFilename = "";
 
-            if (string.IsNullOrEmpty(outputFilename))
-            {
-                outputFilename = Path.GetFileNameWithoutExtension(inputFile) + ext;
-            }
-            else if (!outputFilename.EndsWith(ext))
-            {
-                outputFilename = Path.GetFileNameWithoutExtension(outputFilename) + ext;
-            }
+            string outputFilename = FileUtil.GetFileNameWithNewExtension(inputFile, ".mp4");
+
+
+
 
             inputFile = Path.GetFullPath(inputFile);
             outputFilename = Path.Combine(Path.GetFullPath(outputDirectory), outputFilename);
