@@ -95,7 +95,7 @@ namespace HandbrakeScheduler
                         string outputDirectory = Path.Combine(folder.OutputPath, inputNestedPath);
 
                         var fileInfo = new FileInfo(file);
-                        bool isRemote = IsNetworkPath(file);
+                        bool isRemote = folder.CopyInputToTempFolder || IsNetworkPath(file);
 
                         var job = new TranscodeJob
                         {
@@ -192,7 +192,15 @@ namespace HandbrakeScheduler
 
         private static bool IsNetworkPath(string path)
         {
+            // Check if Network path for mac
+
+
+
+            // Check for UNC paths (Windows) or network paths (Linux/Unix)
+
+
             return path.StartsWith(@"\\") || path.StartsWith("//");
+
         }
     }
 }

@@ -18,6 +18,7 @@
     public class FolderSetting
     {
         public string InputPath { get; set; } = string.Empty;
+        public bool CopyInputToTempFolder { get; set; }
         public string OutputPath { get; set; } = string.Empty;
         public string Preset { get; set; } = string.Empty;
         public string[] FileExtensions { get; set; } = Array.Empty<string>();
