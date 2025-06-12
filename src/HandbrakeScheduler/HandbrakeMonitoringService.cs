@@ -1,4 +1,6 @@
 ﻿using System.Net;
+using System.Runtime.InteropServices;
+using System.Text;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
@@ -36,7 +38,8 @@ namespace HandbrakeScheduler
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
-            _logger.LogInformation("HandBrake Monitoring Service started");
+            _logger.LogInformation("HandBrake Monitoring Service started on {Platform}",
+                RuntimeInformation.OSDescription);
 
             if (!_handBrakeSettings.MonitoringEnabled)
             {
@@ -102,41 +105,223 @@ namespace HandbrakeScheduler
         {
             using var networkConnection = ConnectToNetworkPath(folder.InputPath);
 
-            if (!Directory.Exists(folder.InputPath))
+            var normalizedPath = NormalizePath(folder.InputPath);
+
+            if (!Directory.Exists(normalizedPath))
             {
-                _logger.LogWarning("Folder {InputPath} does not exist", folder.InputPath);
+                _logger.LogWarning("Folder {InputPath} does not exist", normalizedPath);
                 return;
             }
 
-            var files = Directory.EnumerateFiles(folder.InputPath, "*.*",
-                    folder.RecursiveSearch ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly)
-                .Where(file =>
-                {
-                    var fileInfo = new FileInfo(file);
-                    return folder.ShouldProcessFile(fileInfo);
-                });
+            _logger.LogDebug("Scanning folder: {Path}", normalizedPath);
 
-            foreach (var file in files)
+            try
             {
-                var job = CreateTranscodeJob(file, folder);
-                _jobQueue.EnqueueJob(job);
+                var files = SafeEnumerateFiles(normalizedPath, folder.RecursiveSearch)
+                    .Where(file =>
+                    {
+                        try
+                        {
+                            var fileInfo = new FileInfo(file);
+                            return folder.ShouldProcessFile(fileInfo);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning("Error checking file {File}: {Error}", file, ex.Message);
+                            return false;
+                        }
+                    });
 
-                _logger.LogInformation("Queued job for: {FileName} ({FileSize} MB) - Remote: {IsRemote}",
-                    job.FileName, job.FileSizeBytes / 1024 / 1024, job.IsRemoteSource);
+                foreach (var file in files)
+                {
+                    try
+                    {
+                        var job = CreateTranscodeJob(file, folder);
+                        _jobQueue.EnqueueJob(job);
+
+                        _logger.LogInformation("Queued job for: {FileName} ({FileSize} MB) - Remote: {IsRemote}",
+                            job.FileName, job.FileSizeBytes / 1024 / 1024, job.IsRemoteSource);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning("Error creating job for file {File}: {Error}", file, ex.Message);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error enumerating files in folder {Path}", normalizedPath);
+            }
+        }
+
+        private IEnumerable<string> SafeEnumerateFiles(string rootPath, bool recursive)
+        {
+            var searchOption = recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
+            var enumerationOptions = new EnumerationOptions
+            {
+                IgnoreInaccessible = true,
+                RecurseSubdirectories = recursive,
+                ReturnSpecialDirectories = false,
+                AttributesToSkip = FileAttributes.System | FileAttributes.Hidden
+            };
+
+            // Use a queue-based approach for better error handling with recursive searches
+            if (recursive)
+            {
+                return SafeEnumerateFilesRecursive(rootPath);
+            }
+            else
+            {
+                return SafeEnumerateFilesInDirectory(rootPath);
+            }
+        }
+
+        private IEnumerable<string> SafeEnumerateFilesRecursive(string rootPath)
+        {
+            var directoriesToProcess = new Queue<string>();
+            directoriesToProcess.Enqueue(rootPath);
+
+            while (directoriesToProcess.Count > 0)
+            {
+                var currentDirectory = directoriesToProcess.Dequeue();
+
+                // Enumerate files in current directory
+                foreach (var file in SafeEnumerateFilesInDirectory(currentDirectory))
+                {
+                    yield return file;
+                }
+
+                // Add subdirectories to queue
+                foreach (var subDir in SafeEnumerateDirectories(currentDirectory))
+                {
+                    directoriesToProcess.Enqueue(subDir);
+                }
+            }
+        }
+
+        private IEnumerable<string> SafeEnumerateFilesInDirectory(string directoryPath)
+        {
+            try
+            {
+                var normalizedPath = NormalizePath(directoryPath);
+
+                return Directory.EnumerateFiles(normalizedPath, "*.*", SearchOption.TopDirectoryOnly)
+                    .Select(NormalizePath)
+                    .Where(file =>
+                    {
+                        try
+                        {
+                            // Additional validation that file is accessible
+                            return File.Exists(file);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogDebug("Skipping inaccessible file {File}: {Error}", file, ex.Message);
+                            return false;
+                        }
+                    });
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                _logger.LogWarning("Access denied to directory {Directory}: {Error}", directoryPath, ex.Message);
+                return Enumerable.Empty<string>();
+            }
+            catch (DirectoryNotFoundException ex)
+            {
+                _logger.LogWarning("Directory not found {Directory}: {Error}", directoryPath, ex.Message);
+                return Enumerable.Empty<string>();
+            }
+            catch (IOException ex) when (ex.Message.Contains("Invalid argument"))
+            {
+                _logger.LogWarning("Invalid path or filesystem issue with directory {Directory}: {Error}",
+                    directoryPath, ex.Message);
+                return Enumerable.Empty<string>();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Unexpected error enumerating files in directory {Directory}", directoryPath);
+                return Enumerable.Empty<string>();
+            }
+        }
+
+        private IEnumerable<string> SafeEnumerateDirectories(string directoryPath)
+        {
+            try
+            {
+                var normalizedPath = NormalizePath(directoryPath);
+
+                return Directory.EnumerateDirectories(normalizedPath, "*", SearchOption.TopDirectoryOnly)
+                    .Select(NormalizePath)
+                    .Where(dir =>
+                    {
+                        try
+                        {
+                            return Directory.Exists(dir);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogDebug("Skipping inaccessible directory {Directory}: {Error}", dir, ex.Message);
+                            return false;
+                        }
+                    });
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                _logger.LogWarning("Access denied to directory {Directory}: {Error}", directoryPath, ex.Message);
+                return Enumerable.Empty<string>();
+            }
+            catch (DirectoryNotFoundException ex)
+            {
+                _logger.LogWarning("Directory not found {Directory}: {Error}", directoryPath, ex.Message);
+                return Enumerable.Empty<string>();
+            }
+            catch (IOException ex) when (ex.Message.Contains("Invalid argument"))
+            {
+                _logger.LogWarning("Invalid path or filesystem issue with directory {Directory}: {Error}",
+                    directoryPath, ex.Message);
+                return Enumerable.Empty<string>();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Unexpected error enumerating directories in {Directory}", directoryPath);
+                return Enumerable.Empty<string>();
+            }
+        }
+
+        private static string NormalizePath(string path)
+        {
+            if (string.IsNullOrEmpty(path))
+                return path;
+
+            // Normalize Unicode (important for macOS)
+            var normalized = path.Normalize(NormalizationForm.FormC);
+
+            // Handle platform-specific path separators
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            {
+                return normalized.Replace('/', Path.DirectorySeparatorChar);
+            }
+            else
+            {
+                return normalized.Replace('\\', Path.DirectorySeparatorChar);
             }
         }
 
         private TranscodeJob CreateTranscodeJob(string filePath, FolderSetting folder)
         {
-            var relativePath = Path.GetDirectoryName(Path.GetRelativePath(folder.InputPath, filePath));
+            var normalizedInputPath = NormalizePath(folder.InputPath);
+            var normalizedFilePath = NormalizePath(filePath);
+
+            var relativePath = Path.GetDirectoryName(Path.GetRelativePath(normalizedInputPath, normalizedFilePath));
             var outputDirectory = Path.Combine(folder.OutputPath, relativePath ?? string.Empty);
-            var fileInfo = new FileInfo(filePath);
-            var isRemote = folder.CopyInputToTempFolder || IsNetworkPath(filePath);
+
+            var fileInfo = new FileInfo(normalizedFilePath);
+            var isRemote = folder.CopyInputToTempFolder || IsNetworkPath(normalizedFilePath);
 
             return new TranscodeJob
             {
-                InputPath = filePath,
-                OutputDirectory = outputDirectory,
+                InputPath = normalizedFilePath,
+                OutputDirectory = NormalizePath(outputDirectory),
                 Preset = folder.Preset,
                 DeleteSource = folder.DeleteSource,
                 IsRemoteSource = isRemote,
@@ -206,7 +391,35 @@ namespace HandbrakeScheduler
 
         private static bool IsNetworkPath(string path)
         {
-            return path.StartsWith(@"\\") || path.StartsWith("//");
+            if (string.IsNullOrEmpty(path))
+                return false;
+
+            // Windows UNC paths
+            if (path.StartsWith(@"\\") || path.StartsWith("//"))
+                return true;
+
+            // Network drive letters on Windows (basic check)
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows) &&
+                path.Length >= 2 &&
+                char.IsLetter(path[0]) &&
+                path[1] == ':')
+            {
+                // This is a basic check - you might want to enhance this
+                // to actually verify if the drive is a network drive
+                return false;
+            }
+
+            // Unix/Linux/macOS network paths (basic patterns)
+            if (path.StartsWith("/mnt/") ||
+                path.StartsWith("/media/") ||
+                path.StartsWith("/Volumes/"))
+            {
+                // These could be network mounts, but not necessarily
+                // You might want to enhance this logic
+                return false;
+            }
+
+            return false;
         }
     }
 }

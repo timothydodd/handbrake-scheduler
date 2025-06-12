@@ -18,7 +18,7 @@ namespace HandbrakeScheduler
         private readonly string _cliPath;
         private readonly ILogger<HandBrakeCli> _logger;
         private DateTime _lastProgressUpdate = DateTime.Now;
-        private readonly TimeSpan _progressTimeout = TimeSpan.FromSeconds(15);
+        private readonly TimeSpan _progressTimeout = TimeSpan.FromMinutes(3);
         private CancellationTokenSource? _timeoutCancellationTokenSource;
 
         /// <summary>
@@ -96,7 +96,7 @@ namespace HandbrakeScheduler
 
             StartedTranscoding(inputFile, outputFilename);
 
-            bool success;
+            bool success = false;
             try
             {
                 _logger.LogInformation("Starting HandBrake process and timeout monitoring");

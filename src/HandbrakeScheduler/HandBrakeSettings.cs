@@ -22,7 +22,7 @@ namespace HandbrakeScheduler
         public string? Password { get; set; }
 
         // Additional settings that might be useful
-        public int ScanIntervalMinutes { get; set; } = 10;
+        public int ScanIntervalMinutes { get; set; } = 1;
 
         public bool EnableLogging { get; set; } = true;
 
