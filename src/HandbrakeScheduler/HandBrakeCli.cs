@@ -14,7 +14,7 @@ namespace HandbrakeScheduler
 
         public HandbrakeConversionStatus Status { get; } = new HandbrakeConversionStatus();
         private Process? _process;
-        private string _out;
+        private string? _out;
         private readonly string _cliPath;
         private readonly ILogger<HandBrakeCli> _logger;
         private DateTime _lastProgressUpdate = DateTime.Now;
@@ -36,11 +36,11 @@ namespace HandbrakeScheduler
 
         public Action<HandbrakeConversionStatus> _status;
 
-        public HandBrakeCli(string cliPath, ILogger<HandBrakeCli> logger)
+        public HandBrakeCli(HandBrakeSettings settings, ILogger<HandBrakeCli> logger)
         {
-            _cliPath = cliPath;
+            _cliPath = settings.HandBrakeCliPath;
             _logger = logger;
-            _logger.LogInformation("HandBrakeCli initialized with CLI path: {CliPath}", cliPath);
+            _logger.LogInformation("HandBrakeCli initialized with CLI path: {CliPath}", _cliPath);
         }
 
         public async Task<string?> Transcode(string inputFile, string outputDirectory, string preset, Action<HandbrakeConversionStatus> status, bool overwriteExisting = true, bool deletesource = true)

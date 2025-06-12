@@ -77,11 +77,7 @@ namespace HandbrakeScheduler
             services.AddSingleton(handBrakeSettings);
 
             // Register HandBrakeCli with proper error handling
-            services.AddSingleton<HandBrakeCli>(provider =>
-            {
-                var settings = provider.GetRequiredService<HandBrakeSettings>();
-                return new HandBrakeCli(settings.HandBrakeCliPath);
-            });
+            services.AddSingleton<HandBrakeCli>();
 
             // Register application services
             services.AddSingleton<HandBrakeService>();
