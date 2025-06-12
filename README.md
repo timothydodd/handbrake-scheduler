@@ -272,7 +272,7 @@ Or set the log level in configuration:
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License - see the [MIT License](/LICENSE) file for details.
 
 ## Acknowledgments
 
@@ -280,6 +280,3 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - [ShellProgressBar](https://github.com/Mpdreamz/shellprogressbar) for progress visualization
 - Microsoft Extensions for hosting and configuration framework
 
-## Support
-
-- 📖 [Documentation](https://git
