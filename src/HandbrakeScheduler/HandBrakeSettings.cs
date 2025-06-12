@@ -100,7 +100,7 @@ namespace HandbrakeScheduler
         [Required]
         public string Preset { get; set; } = string.Empty;
 
-        public string[] FileExtensions { get; set; } = new[] { ".mkv", ".avi", ".mp4", ".mov", ".wmv", ".flv" };
+        public string[]? FileExtensions { get; set; }
 
         public bool DeleteSource { get; set; }
 
@@ -165,7 +165,7 @@ namespace HandbrakeScheduler
         {
             return fileInfo.Length >= MinFileSizeBytes &&
                    fileInfo.Length <= MaxFileSizeBytes &&
-                   FileExtensions.Contains(fileInfo.Extension, StringComparer.InvariantCultureIgnoreCase);
+                   (FileExtensions == null || FileExtensions.Contains(fileInfo.Extension, StringComparer.InvariantCultureIgnoreCase));
         }
     }
 }
