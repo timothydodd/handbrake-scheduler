@@ -185,13 +185,13 @@ namespace HandbrakeScheduler
             {
                 var currentDirectory = directoriesToProcess.Dequeue();
 
-                // Enumerate files in current directory
+                // Enumerate files in current directory with individual error handling
                 foreach (var file in SafeEnumerateFilesInDirectory(currentDirectory))
                 {
                     yield return file;
                 }
 
-                // Add subdirectories to queue
+                // Add subdirectories to queue with individual error handling
                 foreach (var subDir in SafeEnumerateDirectories(currentDirectory))
                 {
                     directoriesToProcess.Enqueue(subDir);
@@ -201,91 +201,100 @@ namespace HandbrakeScheduler
 
         private IEnumerable<string> SafeEnumerateFilesInDirectory(string directoryPath)
         {
+            var files = new List<string>();
+
             try
             {
                 var normalizedPath = NormalizePath(directoryPath);
+                _logger.LogDebug("Enumerating files in: {Directory}", normalizedPath);
 
-                return Directory.EnumerateFiles(normalizedPath, "*.*", SearchOption.TopDirectoryOnly)
-                    .Select(NormalizePath)
-                    .Where(file =>
+                // Use GetFiles instead of EnumerateFiles for better error handling
+                var fileArray = Directory.GetFiles(normalizedPath, "*.*", SearchOption.TopDirectoryOnly);
+
+                foreach (var file in fileArray)
+                {
+                    try
                     {
-                        try
+                        var normalizedFile = NormalizePath(file);
+                        if (File.Exists(normalizedFile))
                         {
-                            // Additional validation that file is accessible
-                            return File.Exists(file);
+                            files.Add(normalizedFile);
                         }
-                        catch (Exception ex)
-                        {
-                            _logger.LogDebug("Skipping inaccessible file {File}: {Error}", file, ex.Message);
-                            return false;
-                        }
-                    });
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogDebug("Skipping inaccessible file {File}: {Error}", file, ex.Message);
+                    }
+                }
             }
             catch (UnauthorizedAccessException ex)
             {
                 _logger.LogWarning("Access denied to directory {Directory}: {Error}", directoryPath, ex.Message);
-                return Enumerable.Empty<string>();
             }
             catch (DirectoryNotFoundException ex)
             {
                 _logger.LogWarning("Directory not found {Directory}: {Error}", directoryPath, ex.Message);
-                return Enumerable.Empty<string>();
             }
             catch (IOException ex) when (ex.Message.Contains("Invalid argument"))
             {
                 _logger.LogWarning("Invalid path or filesystem issue with directory {Directory}: {Error}",
                     directoryPath, ex.Message);
-                return Enumerable.Empty<string>();
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Unexpected error enumerating files in directory {Directory}", directoryPath);
-                return Enumerable.Empty<string>();
             }
+
+            return files;
         }
 
         private IEnumerable<string> SafeEnumerateDirectories(string directoryPath)
         {
+            var directories = new List<string>();
+
             try
             {
                 var normalizedPath = NormalizePath(directoryPath);
+                _logger.LogDebug("Enumerating directories in: {Directory}", normalizedPath);
 
-                return Directory.EnumerateDirectories(normalizedPath, "*", SearchOption.TopDirectoryOnly)
-                    .Select(NormalizePath)
-                    .Where(dir =>
+                // Use GetDirectories instead of EnumerateDirectories for better error handling
+                var dirArray = Directory.GetDirectories(normalizedPath, "*", SearchOption.TopDirectoryOnly);
+
+                foreach (var dir in dirArray)
+                {
+                    try
                     {
-                        try
+                        var normalizedDir = NormalizePath(dir);
+                        if (Directory.Exists(normalizedDir))
                         {
-                            return Directory.Exists(dir);
+                            directories.Add(normalizedDir);
                         }
-                        catch (Exception ex)
-                        {
-                            _logger.LogDebug("Skipping inaccessible directory {Directory}: {Error}", dir, ex.Message);
-                            return false;
-                        }
-                    });
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogDebug("Skipping inaccessible directory {Directory}: {Error}", dir, ex.Message);
+                    }
+                }
             }
             catch (UnauthorizedAccessException ex)
             {
                 _logger.LogWarning("Access denied to directory {Directory}: {Error}", directoryPath, ex.Message);
-                return Enumerable.Empty<string>();
             }
             catch (DirectoryNotFoundException ex)
             {
                 _logger.LogWarning("Directory not found {Directory}: {Error}", directoryPath, ex.Message);
-                return Enumerable.Empty<string>();
             }
             catch (IOException ex) when (ex.Message.Contains("Invalid argument"))
             {
                 _logger.LogWarning("Invalid path or filesystem issue with directory {Directory}: {Error}",
                     directoryPath, ex.Message);
-                return Enumerable.Empty<string>();
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Unexpected error enumerating directories in {Directory}", directoryPath);
-                return Enumerable.Empty<string>();
             }
+
+            return directories;
         }
 
         private static string NormalizePath(string path)
@@ -293,17 +302,35 @@ namespace HandbrakeScheduler
             if (string.IsNullOrEmpty(path))
                 return path;
 
-            // Normalize Unicode (important for macOS)
-            var normalized = path.Normalize(NormalizationForm.FormC);
+            try
+            {
+                // Normalize Unicode (important for macOS)
+                var normalized = path.Normalize(NormalizationForm.FormC);
 
-            // Handle platform-specific path separators
-            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-            {
-                return normalized.Replace('/', Path.DirectorySeparatorChar);
+                // Handle platform-specific path separators
+                if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+                {
+                    normalized = normalized.Replace('/', Path.DirectorySeparatorChar);
+                }
+                else
+                {
+                    normalized = normalized.Replace('\\', Path.DirectorySeparatorChar);
+                }
+
+                // Additional normalization for macOS - try NFC first, then NFD if needed
+                if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+                {
+                    // Some macOS file systems use NFD (decomposed) Unicode
+                    // Try both forms to see which one works
+                    return normalized;
+                }
+
+                return normalized;
             }
-            else
+            catch (Exception)
             {
-                return normalized.Replace('\\', Path.DirectorySeparatorChar);
+                // If normalization fails, return original path
+                return path;
             }
         }
 
