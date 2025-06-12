@@ -15,6 +15,10 @@ namespace HandbrakeScheduler
         private Process? _process;
         private string _out;
         private readonly string _cliPath;
+        private DateTime _lastProgressUpdate = DateTime.Now;
+        private readonly TimeSpan _progressTimeout = TimeSpan.FromSeconds(30);
+        private CancellationTokenSource? _timeoutCancellationTokenSource;
+
         /// <summary>
         /// Invoked when a conversion has been completed succesfully
         /// </summary>
@@ -34,6 +38,7 @@ namespace HandbrakeScheduler
         {
             _cliPath = cliPath;
         }
+
         public async Task<string?> Transcode(string inputFile, string outputDirectory, string preset, Action<HandbrakeConversionStatus> status, bool overwriteExisting = true, bool deletesource = true)
         {
             if (!File.Exists(inputFile))
@@ -41,22 +46,20 @@ namespace HandbrakeScheduler
                 throw new HandbrakeCliWrapperException($"The input file '{inputFile}' could not be found");
             }
 
-
             if (Status.Converting)
             {
                 throw new HandbrakeCliWrapperException("A conversion is already running");
             }
+
             _status = status;
-
-
+            _lastProgressUpdate = DateTime.Now;
+            _timeoutCancellationTokenSource = new CancellationTokenSource();
 
             string outputFilename = FileUtil.GetFileNameWithNewExtension(inputFile, ".mp4");
 
-
-
-
             inputFile = Path.GetFullPath(inputFile);
             outputFilename = Path.Combine(Path.GetFullPath(outputDirectory), outputFilename);
+
             if (File.Exists(outputFilename) && !overwriteExisting)
             {
                 throw new HandbrakeCliWrapperException($"The file '{outputFilename}' already exists. Set overwriteExisting to true to overwrite");
@@ -80,11 +83,31 @@ namespace HandbrakeScheduler
             bool success;
             try
             {
-                success = await AwaitProcess(_process);
+                // Start the progress timeout monitoring
+                var timeoutTask = MonitorProgressTimeout(_timeoutCancellationTokenSource.Token);
+                var processTask = AwaitProcess(_process);
+
+                // Wait for either the process to complete or timeout to occur
+                var completedTask = await Task.WhenAny(processTask, timeoutTask);
+
+                if (completedTask == timeoutTask)
+                {
+                    // Timeout occurred
+                    StopTranscoding();
+                    throw new HandbrakeCliWrapperException("Transcoding timed out - no progress for 15 seconds");
+                }
+
+                success = await processTask;
             }
-            catch (Exception e)
+            catch (Exception e) when (!(e is HandbrakeCliWrapperException))
             {
                 throw new HandbrakeCliWrapperException("An error occured when starting the HandbrakeCLI process. See inner exception", e);
+            }
+            finally
+            {
+                _timeoutCancellationTokenSource?.Cancel();
+                _timeoutCancellationTokenSource?.Dispose();
+                _timeoutCancellationTokenSource = null;
             }
 
             _process = null;
@@ -110,9 +133,28 @@ namespace HandbrakeScheduler
             }
             return null;
         }
+
+        private async Task MonitorProgressTimeout(CancellationToken cancellationToken)
+        {
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                await Task.Delay(1000, cancellationToken); // Check every second
+
+                if (cancellationToken.IsCancellationRequested)
+                    break;
+
+                var timeSinceLastUpdate = DateTime.Now - _lastProgressUpdate;
+                if (timeSinceLastUpdate > _progressTimeout)
+                {
+                    return; // Timeout reached
+                }
+            }
+        }
+
         private void StartedTranscoding(string inputFile, string outputFile)
         {
             SetStatus(inputFile, outputFile);
+            _lastProgressUpdate = DateTime.Now;
             TranscodingStarted?.Invoke(this, new HandbrakeTranscodingEventArgs(Status.InputFile));
         }
 
@@ -134,6 +176,9 @@ namespace HandbrakeScheduler
             {
                 return;
             }
+
+            // Update the last progress timestamp for any output (not just progress updates)
+            _lastProgressUpdate = DateTime.Now;
 
             Match match = HandbrakeOutputRegex.Match(dataReceivedEventArgs.Data);
             if (!match.Success)
@@ -177,6 +222,7 @@ namespace HandbrakeScheduler
             process.BeginOutputReadLine();
             return await tcs.Task;
         }
+
         /// <summary>
         /// Gets the HandBrake CLI version
         /// </summary>
@@ -233,6 +279,8 @@ namespace HandbrakeScheduler
 
         public void StopTranscoding()
         {
+            _timeoutCancellationTokenSource?.Cancel();
+
             if (_process == null)
             {
                 return;
@@ -254,6 +302,7 @@ namespace HandbrakeScheduler
             }
             catch { }
         }
+
         private void SetStatus(string inputFile = "", string outputFilename = "")
         {
             _out = outputFilename;
@@ -266,7 +315,6 @@ namespace HandbrakeScheduler
             Status.Estimated = TimeSpan.Zero;
         }
     }
-
 
     public class HandbrakeTranscodingEventArgs : EventArgs
     {
@@ -286,6 +334,7 @@ namespace HandbrakeScheduler
         {
         }
     }
+
     public class HandbrakeConversionStatus
     {
         /// <summary>
