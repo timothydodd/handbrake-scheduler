@@ -78,7 +78,7 @@ namespace HandbrakeScheduler
                 throw new HandbrakeCliWrapperException($"The file '{outputFilename}' already exists. Set overwriteExisting to true to overwrite");
             }
 
-            string arg = $"-i \"{inputFile}\" -o \"{outputFilename}\" --preset \"{preset}\"";
+            string arg = $"--input \"{inputFile}\" --output \"{outputFilename}\" --preset \"{preset}\" --verbose=1";
             _logger.LogDebug("HandBrake arguments: {Arguments}", arg);
 
             if (!File.Exists(_cliPath))
@@ -282,8 +282,11 @@ namespace HandbrakeScheduler
             }
 
             // Update progress timestamp for error output too (HandBrake might output to stderr)
+            // Log ALL error output
+            _logger.LogWarning("HandBrake stderr: {ErrorOutput}", dataReceivedEventArgs.Data);
+
+            // Update progress timestamp for error output too
             _lastProgressUpdate = DateTime.Now;
-            _logger.LogWarning("HandBrake error output: {ErrorOutput}", dataReceivedEventArgs.Data);
         }
 
         private async Task<bool> AwaitProcess(Process process)
@@ -293,9 +296,12 @@ namespace HandbrakeScheduler
             TaskCompletionSource<bool> tcs = new();
             process.StartInfo.RedirectStandardOutput = true;
             process.StartInfo.RedirectStandardError = true;
+            process.StartInfo.RedirectStandardInput = true;
             process.StartInfo.UseShellExecute = false;
             process.EnableRaisingEvents = true;
             process.StartInfo.CreateNoWindow = true;
+            process.StartInfo.Environment["LANG"] = "en_US.UTF-8";
+            process.StartInfo.Environment["LC_ALL"] = "en_US.UTF-8";
             process.Exited += Exited;
 
             void Exited(object sender, EventArgs eventArgs)
@@ -307,6 +313,9 @@ namespace HandbrakeScheduler
 
             _logger.LogDebug("Starting HandBrake process");
             _ = process.Start();
+            // Close stdin immediately
+            process.StandardInput.Close();
+
             process.BeginOutputReadLine();
             process.BeginErrorReadLine();
 
