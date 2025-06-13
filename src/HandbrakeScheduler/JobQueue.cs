@@ -49,7 +49,7 @@ namespace HandbrakeScheduler
         public bool DeleteSource { get; set; }
         public DateTime CreatedAt { get; set; } = DateTime.Now;
         public string FileName => Path.GetFileName(InputPath);
-        public bool IsRemoteSource { get; set; }
+        public bool UseTempFolder { get; set; }
         public string? TempFilePath { get; set; }
         public long FileSizeBytes { get; set; }
     }

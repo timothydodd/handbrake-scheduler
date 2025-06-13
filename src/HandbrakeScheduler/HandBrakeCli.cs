@@ -43,7 +43,7 @@ namespace HandbrakeScheduler
             _logger.LogInformation("HandBrakeCli initialized with CLI path: {CliPath}", _cliPath);
         }
 
-        public async Task<string?> Transcode(string inputFile, string outputDirectory, string preset, Action<HandbrakeConversionStatus> status, bool overwriteExisting = true, bool deletesource = true)
+        public async Task<string?> Transcode(string inputFile, string outputDirectory, string preset, Action<HandbrakeConversionStatus> status, bool overwriteExisting = true)
         {
             _logger.LogInformation("Starting transcode process for {InputFile}", inputFile);
 
@@ -140,19 +140,6 @@ namespace HandbrakeScheduler
             if (success)
             {
                 DoneTranscoding();
-                if (deletesource)
-                {
-                    try
-                    {
-                        _logger.LogInformation("Deleting source file: {InputFile}", inputFile);
-                        File.Delete(inputFile);
-                    }
-                    catch (Exception e)
-                    {
-                        _logger.LogError(e, "Failed to delete source file: {InputFile}", inputFile);
-                        throw new HandbrakeCliWrapperException($"Could not remove original '{inputFile}'", e);
-                    }
-                }
                 _logger.LogInformation("Transcoding completed successfully. Output: {OutputFile}", outputFilename);
                 return outputFilename;
             }

@@ -17,34 +17,37 @@ namespace HandbrakeScheduler
         public async Task ProcessSingleJob(TranscodeJob job, TempFileManager tempFileManager, CancellationToken cancellationToken = default)
         {
             string workingFilePath = job.InputPath;
-            bool usedTempFile = false;
+
 
             try
             {
                 _logger.LogInformation("Processing job: {FileName}", job.FileName);
-
-                // Handle remote file copying if needed
-                if (job.IsRemoteSource)
-                {
-                    var tempResult = await HandleRemoteFile(job, tempFileManager, cancellationToken);
-                    workingFilePath = tempResult.FilePath;
-                    usedTempFile = tempResult.UsedTemp;
-                }
-
                 // Ensure output directory exists
                 Directory.CreateDirectory(job.OutputDirectory);
 
+                var outputDirectory = job.OutputDirectory;
+                // Handle remote file copying if needed
+                if (job.UseTempFolder)
+                {
+                    var tempResult = await HandleRemoteFile(job, tempFileManager, cancellationToken);
+                    workingFilePath = tempResult.FilePath;
+                    outputDirectory = Path.GetTempPath();
+                }
+
                 // Perform transcoding
-                var resultFile = await PerformTranscoding(job, workingFilePath, usedTempFile, cancellationToken);
+                var resultFile = await PerformTranscoding(job, workingFilePath, outputDirectory, cancellationToken);
+                if (job.UseTempFolder)
+                {
+                    // Copy result to output directory
+                    await CopyResultToOutput(job, resultFile, tempFileManager, cancellationToken);
+                    // Clean up temporary result file
+                    DeleteFileIfExists(resultFile);
+                }
 
-                // Copy result to output directory
-                await CopyResultToOutput(job, resultFile, tempFileManager, cancellationToken);
 
-                // Clean up temporary result file
-                DeleteFileIfExists(resultFile);
 
                 // Delete original source if requested and we used a temp file
-                if (usedTempFile && job.DeleteSource)
+                if (job.DeleteSource)
                 {
                     DeleteOriginalFile(job);
                 }
@@ -59,7 +62,7 @@ namespace HandbrakeScheduler
             finally
             {
                 // Clean up temp file if we used one
-                if (usedTempFile && !string.IsNullOrEmpty(job.TempFilePath))
+                if (job.UseTempFolder && !string.IsNullOrEmpty(job.TempFilePath))
                 {
                     tempFileManager.CleanupTempFile(job.TempFilePath);
                 }
@@ -93,18 +96,17 @@ namespace HandbrakeScheduler
         private async Task<string> PerformTranscoding(
             TranscodeJob job,
             string workingFilePath,
-            bool usedTempFile,
+            string outputDirectory,
             CancellationToken cancellationToken)
         {
             using var progressBar = CreateProgressBar($"Transcoding {job.FileName}", ConsoleColor.Yellow);
 
             var resultFile = await _cli.Transcode(
                 workingFilePath,
-                Path.GetTempPath(),
+                outputDirectory,
                 job.Preset,
                 status => UpdateTranscodingProgress(progressBar, status, job, cancellationToken),
-                true,
-                job.DeleteSource && !usedTempFile);
+                true);
 
             if (resultFile == null)
             {
@@ -127,6 +129,9 @@ namespace HandbrakeScheduler
             var outputPath = Path.Combine(job.OutputDirectory, resultFileName);
 
             await tempFileManager.CopyFileAsync(resultFile, outputPath, copyProgress, cancellationToken);
+
+
+
 
             _logger.LogInformation("Copied result file to output directory: {OutputDirectory}", job.OutputDirectory);
         }

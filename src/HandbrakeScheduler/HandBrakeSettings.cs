@@ -92,7 +92,7 @@ namespace HandbrakeScheduler
         [Required]
         public string InputPath { get; set; } = string.Empty;
 
-        public bool CopyInputToTempFolder { get; set; }
+        public bool UseTempFolder { get; set; }
 
         [Required]
         public string OutputPath { get; set; } = string.Empty;

@@ -140,7 +140,7 @@ namespace HandbrakeScheduler
                         _jobQueue.EnqueueJob(job);
 
                         _logger.LogInformation("Queued job for: {FileName} ({FileSize} MB) - Remote: {IsRemote}",
-                            job.FileName, job.FileSizeBytes / 1024 / 1024, job.IsRemoteSource);
+                            job.FileName, job.FileSizeBytes / 1024 / 1024, job.UseTempFolder);
                     }
                     catch (Exception ex)
                     {
@@ -343,7 +343,7 @@ namespace HandbrakeScheduler
             var outputDirectory = Path.Combine(folder.OutputPath, relativePath ?? string.Empty);
 
             var fileInfo = new FileInfo(normalizedFilePath);
-            var isRemote = folder.CopyInputToTempFolder || IsNetworkPath(normalizedFilePath);
+            var useTempFolder = folder.UseTempFolder || IsNetworkPath(normalizedFilePath) || IsNetworkPath(outputDirectory);
 
             return new TranscodeJob
             {
@@ -351,7 +351,7 @@ namespace HandbrakeScheduler
                 OutputDirectory = NormalizePath(outputDirectory),
                 Preset = folder.Preset,
                 DeleteSource = folder.DeleteSource,
-                IsRemoteSource = isRemote,
+                UseTempFolder = useTempFolder,
                 FileSizeBytes = fileInfo.Length
             };
         }
