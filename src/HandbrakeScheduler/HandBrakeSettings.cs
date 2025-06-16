@@ -29,6 +29,8 @@ namespace HandbrakeScheduler
 
         public string? LogFilePath { get; set; }
 
+        public string PersistencePath { get; set; } = "data";
+
         // Validation method
         public bool IsValid(out List<string> errors)
         {

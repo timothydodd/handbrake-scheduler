@@ -13,11 +13,11 @@ namespace HandbrakeScheduler
             _logger = logger;
         }
 
-        public async Task ProcessSingleJob(TranscodeJob job, TempFileManager tempFileManager, CancellationToken cancellationToken = default)
+        public async Task<bool> ProcessSingleJob(TranscodeJob job, TempFileManager tempFileManager, CancellationToken cancellationToken = default)
         {
             string workingFilePath = job.InputPath;
 
-
+            bool success = true;
             try
             {
                 _logger.LogInformation("Processing job: {FileName}", job.FileName);
@@ -56,7 +56,8 @@ namespace HandbrakeScheduler
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error processing job: {FileName}", job.FileName);
-                throw;
+                success = false;
+
             }
             finally
             {
@@ -66,6 +67,7 @@ namespace HandbrakeScheduler
                     tempFileManager.CleanupTempFile(job.TempFilePath);
                 }
             }
+            return success;
         }
 
         private async Task<(string FilePath, bool UsedTemp)> HandleRemoteFile(

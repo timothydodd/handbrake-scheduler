@@ -13,13 +13,15 @@ namespace HandbrakeScheduler
         private readonly ILogger<HandBrakeMonitoringService> _logger;
         private readonly TempFileManager _tempFileManager;
         private readonly NetworkCredential? _networkCredential;
+        private readonly FileTransferHostSettings _fileTransferHostSettings;
 
         public HandBrakeMonitoringService(
             HandBrakeService handBrakeService,
             HandBrakeSettings handBrakeSettings,
             JobQueue jobQueue,
             TempFileManager tempFileManager,
-            ILogger<HandBrakeMonitoringService> logger)
+            ILogger<HandBrakeMonitoringService> logger,
+            FileTransferHostSettings fileTransferHostSettings)
         {
             _handBrakeService = handBrakeService;
             _handBrakeSettings = handBrakeSettings;
@@ -33,12 +35,15 @@ namespace HandbrakeScheduler
             {
                 _networkCredential = new NetworkCredential(handBrakeSettings.Username, handBrakeSettings.Password);
             }
+
+            _fileTransferHostSettings = fileTransferHostSettings;
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
             _logger.LogInformation("HandBrake Monitoring Service started on {Platform}",
                 RuntimeInformation.OSDescription);
+
 
             if (!_handBrakeSettings.MonitoringEnabled)
             {
@@ -378,7 +383,10 @@ namespace HandbrakeScheduler
                     if (_jobQueue.TryDequeueJob(out var job) && job != null)
                     {
                         _logger.LogInformation("Processing job: {FileName}", job.FileName);
-                        await _handBrakeService.ProcessSingleJob(job, _tempFileManager, stoppingToken);
+                        if (!await _handBrakeService.ProcessSingleJob(job, _tempFileManager, stoppingToken))
+                        {
+                            _jobQueue.MarkJobFailed(job);
+                        }
                     }
                 }
             }

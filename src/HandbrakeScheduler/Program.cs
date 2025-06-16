@@ -448,8 +448,8 @@ namespace HandbrakeScheduler
 
             // Generate unique filename to avoid conflicts
             var fileExtension = Path.GetExtension(transferRequest.OriginalFileName);
-            var uniqueFileName = $"{Path.GetFileNameWithoutExtension(transferRequest.OriginalFileName)}_{Guid.NewGuid().ToString()}{fileExtension}";
-            var filePath = Path.Combine(_settings.IncomingDirectory, uniqueFileName);
+
+            var filePath = Path.Combine(_settings.IncomingDirectory, transferRequest.OriginalFileName);
 
             try
             {
@@ -460,13 +460,13 @@ namespace HandbrakeScheduler
                 await file.CopyToAsync(fileStream);
                 await fileStream.FlushAsync();
 
-                _logger.LogInformation($"Received file: {uniqueFileName} ({file.Length} bytes)");
+                _logger.LogInformation($"Received file: {transferRequest.OriginalFileName} ({file.Length} bytes)");
 
                 // Create file info record
                 var receivedFileInfo = new ReceivedFileInfo
                 {
                     OriginalFileName = transferRequest.OriginalFileName,
-                    StoredFileName = uniqueFileName,
+                    StoredFileName = transferRequest.OriginalFileName,
                     FilePath = filePath,
                     FileSizeBytes = file.Length,
                     ReceivedTimestamp = DateTime.UtcNow,
@@ -485,7 +485,7 @@ namespace HandbrakeScheduler
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $"Failed to save file: {uniqueFileName}");
+                _logger.LogError(ex, $"Failed to save file: {transferRequest.OriginalFileName}");
 
                 // Clean up partial file
                 try
