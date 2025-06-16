@@ -108,10 +108,7 @@ namespace HandbrakeScheduler
                 options.MultipartHeadersLengthLimit = int.MaxValue;
             });
 
-            services.Configure<IISServerOptions>(options =>
-            {
-                options.MaxRequestBodySize = fileTransferSettings.MaxFileSizeBytes;
-            });
+
             builder.WebHost.ConfigureKestrel(options =>
             {
                 options.Limits.MaxRequestBodySize = fileTransferSettings.MaxFileSizeBytes;
