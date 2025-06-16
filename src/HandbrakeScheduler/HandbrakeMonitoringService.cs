@@ -1,8 +1,7 @@
 ﻿using System.Net;
 using System.Runtime.InteropServices;
 using System.Text;
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
+
 
 namespace HandbrakeScheduler
 {

@@ -6,6 +6,7 @@ namespace HandbrakeScheduler
     {
         [Required]
         public string HandBrakeCliPath { get; set; } = string.Empty;
+        public string DefaultPreset { get; set; } = "HQ 1080p30 Surround";
 
         public FolderSetting[] Folders { get; set; } = Array.Empty<FolderSetting>();
 

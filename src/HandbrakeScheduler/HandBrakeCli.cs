@@ -268,12 +268,40 @@ namespace HandbrakeScheduler
                 return;
             }
 
-            // Update progress timestamp for error output too (HandBrake might output to stderr)
-            // Log ALL error output
-            _logger.LogWarning("HandBrake stderr: {ErrorOutput}", dataReceivedEventArgs.Data);
-
             // Update progress timestamp for error output too
             _lastProgressUpdate = DateTime.Now;
+            var lowerOutput = dataReceivedEventArgs.Data.ToLowerInvariant();
+
+            // These patterns suggest actual problems
+            if (lowerOutput.Contains("error:") ||
+                lowerOutput.Contains("failed") ||
+                lowerOutput.Contains("cannot") ||
+                lowerOutput.Contains("unable to") ||
+                lowerOutput.Contains("not found") ||
+                lowerOutput.Contains("invalid") ||
+                lowerOutput.Contains("corrupted"))
+            {
+                _logger.LogError("HandBrake error: {ErrorOutput}", dataReceivedEventArgs.Data);
+            }
+            // These patterns suggest warnings
+            else if (lowerOutput.Contains("warning:") ||
+                     lowerOutput.Contains("deprecated") ||
+                     lowerOutput.Contains("may not work"))
+            {
+                _logger.LogWarning("HandBrake warning: {WarningOutput}", dataReceivedEventArgs.Data);
+            }
+            // Everything else is just informational/trace
+            else
+            {
+                var trimmed = dataReceivedEventArgs.Data.Trim();
+                if (trimmed.StartsWith('*') || trimmed.StartsWith("+"))
+                {
+                    // Ignore lines that are just asterisks or spaces
+                    _logger.LogInformation("HandBrake: {Output}", dataReceivedEventArgs.Data);
+                    return;
+                }
+                _logger.LogTrace("HandBrake stderr: {Output}", dataReceivedEventArgs.Data);
+            }
         }
 
         private async Task<bool> AwaitProcess(Process process)

@@ -1,9 +1,8 @@
-﻿using Microsoft.Extensions.Logging;
-using ShellProgressBar;
+﻿using ShellProgressBar;
 
 namespace HandbrakeScheduler
 {
-    internal class HandBrakeService
+    public class HandBrakeService
     {
         private readonly HandBrakeCli _cli;
         private readonly ILogger<HandBrakeService> _logger;
