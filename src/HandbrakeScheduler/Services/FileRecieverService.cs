@@ -105,9 +105,9 @@ public class HandBrakeFileProcessor : IHandBrakeFileProcessor
             _logger.LogWarning($"No folder settings found for media type: {fileInfo.RelativeFilePath}");
             throw new InvalidOperationException("No folder settings found for the specified media type.");
         }
-        string normalizedPath = Path.GetFullPath(fileInfo.RelativeFilePath);
-        string folder = Path.GetDirectoryName(normalizedPath);
-        var outputDirectory = Path.Combine(settings.OutputPath, folder);
+        string normalizedPath = PathConverter.NormalizePath(fileInfo.RelativeFilePath);
+        string? folder = Path.GetDirectoryName(normalizedPath);
+        var outputDirectory = Path.Combine(settings.OutputPath, folder ?? "incoming");
         return new TranscodeJob
         {
             InputPath = fileInfo.FilePath,
