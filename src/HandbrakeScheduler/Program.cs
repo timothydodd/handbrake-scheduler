@@ -512,7 +512,7 @@ namespace HandbrakeScheduler
     public class FileTransferHostSettings
     {
         public string IncomingDirectory { get; set; } = "incoming";
-        public long MaxFileSizeBytes { get; set; } = 50L * 1024 * 1024 * 1024; // 50GB
+        public long MaxFileSizeBytes { get; set; } = 100L * 1024 * 1024 * 1024; // 100GB
         public int MaxConcurrentProcessing { get; set; } = 2;
         public string ListenUrl { get; set; } = "http://localhost:5000";
     }
