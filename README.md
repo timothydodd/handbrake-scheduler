@@ -1,25 +1,41 @@
 ﻿# HandBrake Scheduler
 
-A .NET service that automatically monitors directories for video files and transcodes them using HandBrakeCLI with configurable scheduling, time windows, and network support.
+A .NET service that automatically monitors directories for video files and transcodes them using HandBrakeCLI with configurable scheduling, time windows, network support, and REST API for file uploads. Features both directory monitoring and web-based file upload capabilities with advanced job management.
 
 ## Features
 
+### Core Processing
 -  **Automatic Monitoring**: Continuously monitors configured directories for new video files
+-  **Web API Upload**: REST API endpoints for file uploads with rich metadata support
 -  **Time-Based Scheduling**: Optional time windows for processing (e.g., only during off-hours)
--  **Network Share Support**: Works with UNC paths and network drives with credential management
--  **Multi-Directory Support**: Monitor multiple input/output directory pairs simultaneously
--  **Flexible File Filtering**: Configurable file extensions, size limits, and recursive scanning
+-  **Advanced Job Queue**: Persistent job queue with retry logic (up to 3 attempts) and status tracking
 -  **Smart Temp File Management**: Copies remote files locally for faster processing when space allows
 -  **Progress Tracking**: Real-time progress bars for file copying and transcoding operations
+
+### File Management
+-  **Multi-Directory Support**: Monitor multiple input/output directory pairs simultaneously
+-  **Flexible File Filtering**: Configurable file extensions, size limits, and recursive scanning
+-  **Network Share Support**: Works with UNC paths and network drives with credential management
 -  **Source File Management**: Optional deletion of source files after successful transcoding
+-  **Cross-Platform Path Handling**: Intelligent path normalization for Windows/Unix compatibility
+
+### API & Integration
+-  **REST API Endpoints**: File upload, job monitoring, and system control via HTTP
+-  **Rich Media Metadata**: Support for series/movie information, IMDB IDs, genres, and custom fields
+-  **Health Checks**: Built-in health monitoring endpoints
+-  **Large File Support**: Handles files up to 100GB via web upload
+
+### Monitoring & Logging
 -  **Comprehensive Logging**: Console and file logging with configurable levels
+-  **Job Persistence**: Jobs survive application restarts with automatic recovery
 -  **Graceful Shutdown**: Proper cleanup of processes and temporary files on exit
 
 ## Prerequisites
 
-- .NET 6.0 or later
+- .NET 9.0 or later
 - HandBrakeCLI executable
 - Sufficient disk space for temporary files (when processing remote files)
+- Network access for file upload functionality (if using web API)
 
 ## Installation
 
@@ -54,6 +70,8 @@ Create an `appsettings.json` file in the application directory:
     "EndTime": "06:00:00",
     "Username": "domain\\username",
     "Password": "password",
+    "PersistencePath": "data",
+    "DefaultPreset": "HQ 1080p30 Surround",
     "Folders": [
       {
         "InputPath": "/input/videos",
@@ -61,12 +79,18 @@ Create an `appsettings.json` file in the application directory:
         "Preset": "Fast 1080p30",
         "FileExtensions": [".mkv", ".avi", ".mp4", ".mov"],
         "DeleteSource": false,
-        "CopyInputToTempFolder": true,
+        "UseTempFolder": true,
         "RecursiveSearch": true,
         "MaxFileSizeBytes": 21474836480,
         "MinFileSizeBytes": 104857600
       }
     ]
+  },
+  "FileTransfer": {
+    "IncomingDirectory": "incoming",
+    "MaxFileSizeBytes": 107374182400,
+    "MaxConcurrentProcessing": 2,
+    "ListenUrl": "http://localhost:5000"
   },
   "Logging": {
     "LogLevel": {
@@ -87,6 +111,8 @@ Create an `appsettings.json` file in the application directory:
 - **`Username`/`Password`**: Credentials for network shares
 - **`EnableLogging`**: Enable file logging (default: true)
 - **`LogFilePath`**: Custom log file path
+- **`PersistencePath`**: Directory for job queue persistence (default: "data")
+- **`DefaultPreset`**: Default HandBrake preset for uploaded files
 
 #### Folder Settings
 - **`InputPath`**: Directory to monitor for video files (required)
@@ -94,10 +120,16 @@ Create an `appsettings.json` file in the application directory:
 - **`Preset`**: HandBrake preset name (required)
 - **`FileExtensions`**: Array of file extensions to process
 - **`DeleteSource`**: Delete original files after successful transcoding
-- **`CopyInputToTempFolder`**: Copy remote files to local temp for processing
+- **`UseTempFolder`**: Copy remote files to local temp for processing
 - **`RecursiveSearch`**: Search subdirectories (default: true)
 - **`MaxFileSizeBytes`**: Maximum file size to process
 - **`MinFileSizeBytes`**: Minimum file size to process
+
+#### FileTransfer Settings
+- **`IncomingDirectory`**: Directory for uploaded files (default: "incoming")
+- **`MaxFileSizeBytes`**: Maximum upload file size in bytes (default: 100GB)
+- **`MaxConcurrentProcessing`**: Number of concurrent processing jobs (default: 2)
+- **`ListenUrl`**: Web API listening URL (default: "http://localhost:5000")
 
 ## Usage
 
@@ -111,6 +143,33 @@ dotnet run
 **Production:**
 ```bash
 dotnet HandbrakeScheduler.dll
+```
+
+### Web API Usage
+
+The application provides REST API endpoints for file upload and monitoring:
+
+#### Upload Files
+```bash
+# Upload a video file with metadata
+curl -X POST http://localhost:5000/upload \
+  -F "metadata={\"OriginalFileName\":\"video.mkv\",\"FileSizeBytes\":1000000,\"MediaInfo\":{\"MediaType\":\"Movie\",\"MovieTitle\":\"Example Movie\"},\"TransferTimestamp\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" \
+  -F "file=@/path/to/video.mkv"
+```
+
+#### Monitor Jobs
+```bash
+# Check job queue status
+curl http://localhost:5000/jobs
+
+# List uploaded files
+curl http://localhost:5000/files
+
+# Health check
+curl http://localhost:5000/health
+
+# Stop processing (maintenance)
+curl -X POST http://localhost:5000/stop
 ```
 
 ### Running as a Service
@@ -195,18 +254,40 @@ export HANDBRAKE__HandBrakeCliPath="/usr/local/bin/HandBrakeCLI"
 export HANDBRAKE__MonitoringEnabled="true"
 export HANDBRAKE__StartTime="23:00:00"
 export HANDBRAKE__EndTime="07:00:00"
+export HANDBRAKE__FileTransfer__MaxFileSizeBytes="107374182400"
+export HANDBRAKE__FileTransfer__ListenUrl="http://0.0.0.0:5000"
 ```
 
 ## Logging
 
 The application provides comprehensive logging:
 
-- **Console Logging**: Real-time status and progress information
+- **Console Logging**: Real-time status and progress information with color-coded levels
 - **File Logging**: Detailed logs saved to configured file path
 - **Progress Bars**: Visual progress indicators for file operations
 - **Structured Logging**: JSON-formatted logs for easy parsing
+- **Custom Formatting**: Timestamp, log level, and message formatting
 
 Log levels can be configured per namespace in `appsettings.json`.
+
+## Job Management
+
+The application includes advanced job management features:
+
+- **Persistent Queue**: Jobs are saved to disk and survive application restarts
+- **Retry Logic**: Failed jobs are automatically retried up to 3 times
+- **Status Tracking**: Jobs track their status (Pending, Processing, Completed, Failed)
+- **Time Window Respect**: Processing only occurs during configured time windows
+- **Concurrent Limiting**: Configurable number of concurrent processing jobs
+
+## Media Metadata Support
+
+The file upload system supports rich media metadata:
+
+- **Movie Information**: Title, year, IMDB ID, genre, runtime
+- **TV Series Information**: Series title, season, episode, episode title
+- **Custom Metadata**: Additional key-value pairs for specialized use cases
+- **Automatic Organization**: Files organized based on media type and metadata
 
 ## Troubleshooting
 
@@ -233,8 +314,16 @@ Error: Access denied to network path
 Warning: Insufficient disk space for temp copy
 ```
 - Free up space in the temp directory
-- Disable `CopyInputToTempFolder` to process files directly
+- Disable `UseTempFolder` to process files directly
 - Adjust `MaxFileSizeBytes` to filter large files
+
+**File Upload Issues**
+```
+Error: File size exceeds maximum
+```
+- Check `FileTransfer.MaxFileSizeBytes` setting (default: 100GB)
+- Verify network connectivity and timeout settings
+- Ensure sufficient disk space in `IncomingDirectory`
 
 **Permission Errors**
 ```
