@@ -2,6 +2,15 @@
 
 A .NET service that automatically monitors directories for video files and transcodes them using HandBrakeCLI with configurable scheduling, time windows, network support, and REST API for file uploads. Features both directory monitoring and web-based file upload capabilities with advanced job management.
 
+## Integration with AutoMk
+
+HandbrakeScheduler integrates seamlessly with [AutoMk](https://github.com/timothydodd/auto-mk) to create an automated disc-to-library pipeline:
+
+1. **AutoMk** automatically rips Blu-ray/DVD discs using MakeMKV
+2. **HandbrakeScheduler** receives and transcodes the ripped MKV files
+
+This integration enables hands-free processing from physical media to optimized video files ready for your Plex/media server.
+
 ## Features
 
 ### Core Processing
@@ -143,6 +152,40 @@ dotnet run
 **Production:**
 ```bash
 dotnet HandbrakeScheduler.dll
+```
+
+### Integration with AutoMk
+
+When receiving files from AutoMk, HandbrakeScheduler:
+
+1. **Preserves Folder Structure**: Uses the relative file path from AutoMk to maintain organization
+2. **Routes by Media Type**: Automatically selects appropriate HandBrake presets based on content type (Movie/TV)
+3. **Maintains Metadata**: Preserves movie titles, series information, and episode details
+
+To receive files from AutoMk:
+
+1. Ensure HandbrakeScheduler is running on the configured port (default: 5000)
+2. Configure folder settings in `appsettings.json` with appropriate presets for Movies and TV content
+3. AutoMk will automatically send completed rips via the `/upload` endpoint
+
+Example folder configuration for AutoMk integration:
+```json
+{
+  "HandBrake": {
+    "Folders": [
+      {
+        "InputPath": "incoming/Movies",
+        "OutputPath": "/output/Movies",
+        "Preset": "HQ 1080p30 Surround"
+      },
+      {
+        "InputPath": "incoming/TV Shows",
+        "OutputPath": "/output/TV Shows",
+        "Preset": "HQ 720p30 Surround"
+      }
+    ]
+  }
+}
 ```
 
 ### Web API Usage
@@ -363,9 +406,22 @@ Or set the log level in configuration:
 
 This project is licensed under the MIT License - see the [MIT License](/LICENSE) file for details.
 
+## Complete Media Pipeline Example
+
+When used together with AutoMk, you can create a fully automated media processing pipeline:
+
+1. **Insert Disc**: Place a Blu-ray or DVD in your drive
+2. **AutoMk Rips**: Automatically detects disc, rips with MakeMKV, identifies content via OMDB
+3. **File Transfer**: AutoMk sends the ripped MKV file to HandbrakeScheduler via HTTP
+4. **Transcoding**: HandbrakeScheduler queues and processes the file with appropriate presets
+5. **Final Output**: Transcoded file is saved to your media library with proper naming
+
+This creates a hands-free workflow from physical disc to optimized media file, perfect for building or maintaining a Plex library.
+
 ## Acknowledgments
 
 - [HandBrake](https://handbrake.fr/) for the excellent video transcoding engine
 - [ShellProgressBar](https://github.com/Mpdreamz/shellprogressbar) for progress visualization
 - Microsoft Extensions for hosting and configuration framework
+- [AutoMk](https://github.com/timothydodd/auto-mk) for seamless disc ripping integration
 

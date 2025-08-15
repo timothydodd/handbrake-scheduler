@@ -14,6 +14,7 @@ namespace HandbrakeScheduler
         private readonly TempFileManager _tempFileManager;
         private readonly NetworkCredential? _networkCredential;
         private readonly FileTransferHostSettings _fileTransferHostSettings;
+        private readonly VideoInfoService _videoInfoService;
 
         public HandBrakeMonitoringService(
             HandBrakeService handBrakeService,
@@ -21,13 +22,15 @@ namespace HandbrakeScheduler
             JobQueue jobQueue,
             TempFileManager tempFileManager,
             ILogger<HandBrakeMonitoringService> logger,
-            FileTransferHostSettings fileTransferHostSettings)
+            FileTransferHostSettings fileTransferHostSettings,
+            VideoInfoService videoInfoService)
         {
             _handBrakeService = handBrakeService;
             _handBrakeSettings = handBrakeSettings;
             _jobQueue = jobQueue;
             _tempFileManager = tempFileManager;
             _logger = logger;
+            _videoInfoService = videoInfoService;
 
             // Initialize network credentials if provided
             if (!string.IsNullOrEmpty(handBrakeSettings.Username) &&
@@ -57,7 +60,7 @@ namespace HandbrakeScheduler
 
         private async Task RunSingleScan(CancellationToken stoppingToken)
         {
-            ScanAndQueueJobs();
+            await ScanAndQueueJobsAsync();
             await ProcessJobs(stoppingToken);
         }
 
@@ -69,7 +72,7 @@ namespace HandbrakeScheduler
                 {
                     _logger.LogInformation("Starting monitoring cycle");
 
-                    ScanAndQueueJobs();
+                    await ScanAndQueueJobsAsync();
 
                     if (IsInAllowedTimeWindow())
                     {
@@ -90,13 +93,13 @@ namespace HandbrakeScheduler
             }
         }
 
-        private void ScanAndQueueJobs()
+        private async Task ScanAndQueueJobsAsync()
         {
             foreach (var folder in _handBrakeSettings.Folders)
             {
                 try
                 {
-                    ScanFolder(folder);
+                    await ScanFolderAsync(folder);
                 }
                 catch (Exception ex)
                 {
@@ -105,7 +108,7 @@ namespace HandbrakeScheduler
             }
         }
 
-        private void ScanFolder(FolderSetting folder)
+        private async Task ScanFolderAsync(FolderSetting folder)
         {
             using var networkConnection = ConnectToNetworkPath(folder.InputPath);
 
@@ -140,11 +143,11 @@ namespace HandbrakeScheduler
                 {
                     try
                     {
-                        var job = CreateTranscodeJob(file, folder);
+                        var job = await CreateTranscodeJobAsync(file, folder);
                         _jobQueue.EnqueueJob(job);
 
-                        _logger.LogInformation("Queued job for: {FileName} ({FileSize} MB) - Remote: {IsRemote}",
-                            job.FileName, job.FileSizeBytes / 1024 / 1024, job.UseTempFolder);
+                        _logger.LogInformation("Queued job for: {FileName} ({FileSize} MB) - Preset: {Preset} - Remote: {IsRemote}",
+                            job.FileName, job.FileSizeBytes / 1024 / 1024, job.Preset, job.UseTempFolder);
                     }
                     catch (Exception ex)
                     {
@@ -338,7 +341,7 @@ namespace HandbrakeScheduler
             }
         }
 
-        private TranscodeJob CreateTranscodeJob(string filePath, FolderSetting folder)
+        private async Task<TranscodeJob> CreateTranscodeJobAsync(string filePath, FolderSetting folder)
         {
             var normalizedInputPath = NormalizePath(folder.InputPath);
             var normalizedFilePath = NormalizePath(filePath);
@@ -349,11 +352,18 @@ namespace HandbrakeScheduler
             var fileInfo = new FileInfo(normalizedFilePath);
             var useTempFolder = folder.UseTempFolder || IsNetworkPath(normalizedFilePath) || IsNetworkPath(outputDirectory);
 
+            // Detect video resolution to determine the appropriate preset
+            var videoInfo = await _videoInfoService.GetVideoInfoAsync(normalizedFilePath);
+            var selectedPreset = folder.GetPresetForResolution(videoInfo.Width, videoInfo.Height);
+
+            _logger.LogDebug("Video {File} detected as {Width}x{Height}, using preset: {Preset}",
+                Path.GetFileName(normalizedFilePath), videoInfo.Width, videoInfo.Height, selectedPreset);
+
             return new TranscodeJob
             {
                 InputPath = normalizedFilePath,
                 OutputDirectory = NormalizePath(outputDirectory),
-                Preset = folder.Preset,
+                Preset = selectedPreset,
                 DeleteSource = folder.DeleteSource,
                 UseTempFolder = useTempFolder,
                 FileSizeBytes = fileInfo.Length

@@ -114,6 +114,9 @@ namespace HandbrakeScheduler
 
         public long MinFileSizeBytes { get; set; } = 0;
 
+        // Resolution-based preset mapping
+        public ResolutionPresetMapping[]? ResolutionPresets { get; set; }
+
         // Validation method
         public bool IsValid(out List<string> errors)
         {
@@ -170,5 +173,41 @@ namespace HandbrakeScheduler
                    fileInfo.Length <= MaxFileSizeBytes &&
                    (FileExtensions == null || FileExtensions.Contains(fileInfo.Extension, StringComparer.InvariantCultureIgnoreCase));
         }
+
+        public string GetPresetForResolution(int? width, int? height)
+        {
+            // If no resolution-based presets are configured, use the default preset
+            if (ResolutionPresets == null || ResolutionPresets.Length == 0)
+            {
+                return Preset;
+            }
+
+            // If we couldn't detect resolution, use the default preset
+            if (!width.HasValue || !height.HasValue)
+            {
+                return Preset;
+            }
+
+            // Find the best matching preset based on resolution
+            // Sort by minimum height descending to find the highest resolution that matches
+            var matchingPreset = ResolutionPresets
+                .Where(rp => height.Value >= rp.MinHeight && (rp.MaxHeight == null || height.Value <= rp.MaxHeight))
+                .Where(rp => width.Value >= rp.MinWidth && (rp.MaxWidth == null || width.Value <= rp.MaxWidth))
+                .OrderByDescending(rp => rp.MinHeight)
+                .ThenByDescending(rp => rp.MinWidth)
+                .FirstOrDefault();
+
+            return matchingPreset?.Preset ?? Preset;
+        }
+    }
+
+    public class ResolutionPresetMapping
+    {
+        public int MinWidth { get; set; }
+        public int? MaxWidth { get; set; }
+        public int MinHeight { get; set; }
+        public int? MaxHeight { get; set; }
+        public string Preset { get; set; } = string.Empty;
+        public string? Description { get; set; }
     }
 }

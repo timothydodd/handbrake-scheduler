@@ -124,6 +124,7 @@ namespace HandbrakeScheduler
             services.AddSingleton<HandBrakeService>();
             services.AddSingleton<JobQueue>();
             services.AddSingleton<TempFileManager>();
+            services.AddSingleton<VideoInfoService>();
 
             // Register file transfer services
             services.AddScoped<IFileReceiver, FileReceiver>();
