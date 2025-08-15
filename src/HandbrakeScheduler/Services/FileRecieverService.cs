@@ -11,18 +11,21 @@ public class HandBrakeFileProcessor : IHandBrakeFileProcessor
     private readonly HandBrakeSettings _handBrakeSettings;
     private readonly JobQueue _jobQueue;
     private readonly ILogger<HandBrakeFileProcessor> _logger;
+    private readonly VideoInfoService _videoInfoService;
 
 
     public HandBrakeFileProcessor(
         FileTransferHostSettings settings,
         HandBrakeSettings handBrakeSettings,
         JobQueue jobQueue,
-        ILogger<HandBrakeFileProcessor> logger)
+        ILogger<HandBrakeFileProcessor> logger,
+        VideoInfoService videoInfoService)
     {
         _settings = settings;
         _handBrakeSettings = handBrakeSettings;
         _jobQueue = jobQueue;
         _logger = logger;
+        _videoInfoService = videoInfoService;
 
         // Ensure output directory exists
 
@@ -36,14 +39,14 @@ public class HandBrakeFileProcessor : IHandBrakeFileProcessor
     }
 
 
-    private void ProcessFileWithHandBrake(ReceivedFileInfo fileInfo)
+    private async void ProcessFileWithHandBrake(ReceivedFileInfo fileInfo)
     {
         _logger.LogInformation($"Starting HandBrake processing of: {fileInfo.StoredFileName}");
 
         try
         {
             // Create a HandBrake job based on the media info
-            var transcodeJob = CreateTranscodeJob(fileInfo);
+            var transcodeJob = await CreateTranscodeJob(fileInfo);
 
             // Add to the existing job queue
             _jobQueue.EnqueueJob(transcodeJob);
@@ -61,7 +64,7 @@ public class HandBrakeFileProcessor : IHandBrakeFileProcessor
         }
     }
 
-    private TranscodeJob CreateTranscodeJob(ReceivedFileInfo fileInfo)
+    private async Task<TranscodeJob> CreateTranscodeJob(ReceivedFileInfo fileInfo)
     {
 
 
@@ -105,6 +108,20 @@ public class HandBrakeFileProcessor : IHandBrakeFileProcessor
             _logger.LogWarning($"No folder settings found for media type: {fileInfo.RelativeFilePath}");
             throw new InvalidOperationException("No folder settings found for the specified media type.");
         }
+
+        // Get video information to determine the best preset
+        string preset = settings.Preset; // Default preset
+        try
+        {
+            var videoInfo = await _videoInfoService.GetVideoInfoAsync(fileInfo.FilePath);
+            preset = settings.GetPresetForResolution(videoInfo.Width, videoInfo.Height);
+            _logger.LogInformation($"Video resolution detected: {videoInfo.Width}x{videoInfo.Height}, using preset: {preset}");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, $"Failed to get video info for {fileInfo.FilePath}, using default preset: {preset}");
+        }
+
         string normalizedPath = PathConverter.NormalizePath(fileInfo.RelativeFilePath);
         string? folder = Path.GetDirectoryName(normalizedPath);
         var outputDirectory = Path.Combine(settings.OutputPath, folder ?? "incoming");
@@ -112,7 +129,7 @@ public class HandBrakeFileProcessor : IHandBrakeFileProcessor
         {
             InputPath = fileInfo.FilePath,
             OutputDirectory = outputDirectory,
-            Preset = settings.Preset,
+            Preset = preset,
             DeleteSource = true, // Don't delete source files from AutoMk by default
             CreatedAt = DateTime.Now,
             UseTempFolder = false, // Use temp folder for safety
