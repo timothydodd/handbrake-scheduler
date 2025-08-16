@@ -1,5 +1,6 @@
 ﻿using System.Collections.Concurrent;
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
 
 namespace HandbrakeScheduler
 {
@@ -46,20 +47,15 @@ namespace HandbrakeScheduler
 
         public void MarkJobFailed(TranscodeJob job, string errorMessage = "")
         {
-            // Re-enqueue failed jobs for retry (optional)
-
-            if (job.RetryCount < 3) // Max 3 retries
-            {
-                job.RetryCount++;
-                job.Status = JobStatus.Pending;
-                job.LastError = errorMessage;
-                _jobs.Enqueue(job);
-            }
-            else
-            {
-                job.Status = JobStatus.Failed;
-                job.LastError = errorMessage;
-            }
+            // Don't retry failed jobs - just mark as failed and remove from queue
+            // The source file will remain in the _moved folder
+            job.Status = JobStatus.Failed;
+            job.LastError = errorMessage;
+            
+            // Log the failure
+            var logger = LoggerFactory.Create(builder => builder.AddConsole()).CreateLogger<JobQueue>();
+            logger.LogWarning("Job failed for {FileName}. File remains in _moved folder at: {Path}", 
+                job.FileName, job.InputPath);
 
             SaveToDisk();
         }

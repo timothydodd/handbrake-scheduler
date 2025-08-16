@@ -21,9 +21,16 @@ namespace HandbrakeScheduler
             try
             {
                 _logger.LogInformation("Processing job: {FileName}", job.FileName);
+                
+                // Move source file to _moved folder to prevent reprocessing
+                workingFilePath = MoveSourceToMovedFolder(job);
+                
                 // Ensure output directory exists
                 Directory.CreateDirectory(job.OutputDirectory);
 
+                // Update job with new path after moving to _moved
+                job.InputPath = workingFilePath;
+                
                 var outputDirectory = job.OutputDirectory;
                 // Handle remote file copying if needed
                 if (job.UseTempFolder)
@@ -45,19 +52,16 @@ namespace HandbrakeScheduler
 
 
 
-                // Delete original source if requested and we used a temp file
-                if (job.DeleteSource)
-                {
-                    DeleteOriginalFile(job);
-                }
+                // Source file has already been moved to _moved folder at the beginning
 
                 _logger.LogInformation("Successfully processed job: {FileName}", job.FileName);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error processing job: {FileName}", job.FileName);
+                _logger.LogError(ex, "Error processing job: {FileName}. File will remain in _moved folder at: {MovedPath}", 
+                    job.FileName, workingFilePath);
                 success = false;
-
+                // Don't delete the source file - leave it in _moved folder
             }
             finally
             {
@@ -137,16 +141,47 @@ namespace HandbrakeScheduler
             _logger.LogInformation("Copied result file to output directory: {OutputDirectory}", job.OutputDirectory);
         }
 
-        private void DeleteOriginalFile(TranscodeJob job)
+        private string MoveSourceToMovedFolder(TranscodeJob job)
         {
             try
             {
-                File.Delete(job.InputPath);
-                _logger.LogInformation("Deleted original file: {FileName}", job.FileName);
+                // Get the directory of the input file
+                var inputDirectory = Path.GetDirectoryName(job.InputPath);
+                if (string.IsNullOrEmpty(inputDirectory))
+                {
+                    _logger.LogWarning("Could not determine input directory for: {FileName}", job.FileName);
+                    return job.InputPath;
+                }
+
+                // Create _moved folder path
+                var movedFolderPath = Path.Combine(inputDirectory, "_moved");
+                
+                // Ensure _moved directory exists
+                Directory.CreateDirectory(movedFolderPath);
+                
+                // Create new path in _moved folder
+                var movedFilePath = Path.Combine(movedFolderPath, job.FileName);
+                
+                // Check if file already exists in _moved folder
+                if (File.Exists(movedFilePath))
+                {
+                    // Add timestamp to filename to make it unique
+                    var fileNameWithoutExt = Path.GetFileNameWithoutExtension(job.FileName);
+                    var extension = Path.GetExtension(job.FileName);
+                    var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+                    movedFilePath = Path.Combine(movedFolderPath, $"{fileNameWithoutExt}_{timestamp}{extension}");
+                }
+                
+                // Move the file
+                File.Move(job.InputPath, movedFilePath);
+                _logger.LogInformation("Moved source file from {Source} to {Destination}", job.InputPath, movedFilePath);
+                
+                return movedFilePath;
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Could not delete original file: {FileName}", job.FileName);
+                _logger.LogError(ex, "Could not move source file to _moved folder: {FileName}. Processing from original location.", job.FileName);
+                return job.InputPath;
             }
         }
 

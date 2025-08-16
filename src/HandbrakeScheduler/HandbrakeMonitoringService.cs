@@ -129,6 +129,13 @@ namespace HandbrakeScheduler
                     {
                         try
                         {
+                            // Skip files in _moved directories
+                            if (file.Contains(Path.DirectorySeparatorChar + "_moved" + Path.DirectorySeparatorChar) ||
+                                file.Contains(Path.AltDirectorySeparatorChar + "_moved" + Path.AltDirectorySeparatorChar))
+                            {
+                                return false;
+                            }
+                            
                             var fileInfo = new FileInfo(file);
                             return folder.ShouldProcessFile(fileInfo);
                         }
@@ -272,6 +279,14 @@ namespace HandbrakeScheduler
                     try
                     {
                         var normalizedDir = NormalizePath(dir);
+                        
+                        // Skip _moved directories
+                        if (Path.GetFileName(normalizedDir) == "_moved")
+                        {
+                            _logger.LogDebug("Skipping _moved directory: {Directory}", normalizedDir);
+                            continue;
+                        }
+                        
                         if (Directory.Exists(normalizedDir))
                         {
                             directories.Add(normalizedDir);
@@ -395,7 +410,10 @@ namespace HandbrakeScheduler
                         _logger.LogInformation("Processing job: {FileName}", job.FileName);
                         if (!await _handBrakeService.ProcessSingleJob(job, _tempFileManager, stoppingToken))
                         {
-                            _jobQueue.MarkJobFailed(job);
+                            var errorMsg = $"HandBrake processing failed. File remains in _moved folder.";
+                            _logger.LogError("Failed to process {FileName}. File will remain in _moved folder at: {Path}", 
+                                job.FileName, job.InputPath);
+                            _jobQueue.MarkJobFailed(job, errorMsg);
                         }
                     }
                 }
