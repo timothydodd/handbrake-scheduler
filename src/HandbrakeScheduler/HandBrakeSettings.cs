@@ -95,7 +95,7 @@ namespace HandbrakeScheduler
         [Required]
         public string InputPath { get; set; } = string.Empty;
 
-        public bool UseTempFolder { get; set; }
+        public string StagingPath { get; set; } = string.Empty;
 
         [Required]
         public string OutputPath { get; set; } = string.Empty;

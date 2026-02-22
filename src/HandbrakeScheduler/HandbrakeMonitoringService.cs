@@ -1,6 +1,5 @@
 ﻿using System.Net;
 using System.Runtime.InteropServices;
-using System.Text;
 
 
 namespace HandbrakeScheduler
@@ -112,7 +111,7 @@ namespace HandbrakeScheduler
         {
             using var networkConnection = ConnectToNetworkPath(folder.InputPath);
 
-            var normalizedPath = NormalizePath(folder.InputPath);
+            var normalizedPath = PathConverter.NormalizePath(folder.InputPath);
 
             if (!Directory.Exists(normalizedPath))
             {
@@ -154,7 +153,7 @@ namespace HandbrakeScheduler
                         _jobQueue.EnqueueJob(job);
 
                         _logger.LogInformation("Queued job for: {FileName} ({FileSize} MB) - Preset: {Preset} - Remote: {IsRemote}",
-                            job.FileName, job.FileSizeBytes / 1024 / 1024, job.Preset, job.UseTempFolder);
+                            job.FileName, job.FileSizeBytes / 1024 / 1024, job.Preset, !string.IsNullOrEmpty(job.StagingPath));
                     }
                     catch (Exception ex)
                     {
@@ -219,7 +218,7 @@ namespace HandbrakeScheduler
 
             try
             {
-                var normalizedPath = NormalizePath(directoryPath);
+                var normalizedPath = PathConverter.NormalizePath(directoryPath);
                 _logger.LogDebug("Enumerating files in: {Directory}", normalizedPath);
 
                 // Use GetFiles instead of EnumerateFiles for better error handling
@@ -229,7 +228,7 @@ namespace HandbrakeScheduler
                 {
                     try
                     {
-                        var normalizedFile = NormalizePath(file);
+                        var normalizedFile = PathConverter.NormalizePath(file);
                         if (File.Exists(normalizedFile))
                         {
                             files.Add(normalizedFile);
@@ -268,7 +267,7 @@ namespace HandbrakeScheduler
 
             try
             {
-                var normalizedPath = NormalizePath(directoryPath);
+                var normalizedPath = PathConverter.NormalizePath(directoryPath);
                 _logger.LogDebug("Enumerating directories in: {Directory}", normalizedPath);
 
                 // Use GetDirectories instead of EnumerateDirectories for better error handling
@@ -278,7 +277,7 @@ namespace HandbrakeScheduler
                 {
                     try
                     {
-                        var normalizedDir = NormalizePath(dir);
+                        var normalizedDir = PathConverter.NormalizePath(dir);
                         
                         // Skip _moved directories
                         if (Path.GetFileName(normalizedDir) == "_moved")
@@ -319,53 +318,18 @@ namespace HandbrakeScheduler
             return directories;
         }
 
-        private static string NormalizePath(string path)
-        {
-            if (string.IsNullOrEmpty(path))
-                return path;
-
-            try
-            {
-                // Normalize Unicode (important for macOS)
-                var normalized = path.Normalize(NormalizationForm.FormC);
-
-                // Handle platform-specific path separators
-                if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-                {
-                    normalized = normalized.Replace('/', Path.DirectorySeparatorChar);
-                }
-                else
-                {
-                    normalized = normalized.Replace('\\', Path.DirectorySeparatorChar);
-                }
-
-                // Additional normalization for macOS - try NFC first, then NFD if needed
-                if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
-                {
-                    // Some macOS file systems use NFD (decomposed) Unicode
-                    // Try both forms to see which one works
-                    return normalized;
-                }
-
-                return normalized;
-            }
-            catch (Exception)
-            {
-                // If normalization fails, return original path
-                return path;
-            }
-        }
-
         private async Task<TranscodeJob> CreateTranscodeJobAsync(string filePath, FolderSetting folder)
         {
-            var normalizedInputPath = NormalizePath(folder.InputPath);
-            var normalizedFilePath = NormalizePath(filePath);
+            var normalizedInputPath = PathConverter.NormalizePath(folder.InputPath);
+            var normalizedFilePath = PathConverter.NormalizePath(filePath);
 
             var relativePath = Path.GetDirectoryName(Path.GetRelativePath(normalizedInputPath, normalizedFilePath));
             var outputDirectory = Path.Combine(folder.OutputPath, relativePath ?? string.Empty);
 
             var fileInfo = new FileInfo(normalizedFilePath);
-            var useTempFolder = folder.UseTempFolder || IsNetworkPath(normalizedFilePath) || IsNetworkPath(outputDirectory);
+            var stagingPath = !string.IsNullOrEmpty(folder.StagingPath) || IsNetworkPath(normalizedFilePath) || IsNetworkPath(outputDirectory)
+                ? (string.IsNullOrEmpty(folder.StagingPath) ? Path.GetTempPath() : folder.StagingPath)
+                : string.Empty;
 
             // Detect video resolution to determine the appropriate preset
             var videoInfo = await _videoInfoService.GetVideoInfoAsync(normalizedFilePath);
@@ -377,10 +341,10 @@ namespace HandbrakeScheduler
             return new TranscodeJob
             {
                 InputPath = normalizedFilePath,
-                OutputDirectory = NormalizePath(outputDirectory),
+                OutputDirectory = PathConverter.NormalizePath(outputDirectory),
                 Preset = selectedPreset,
                 DeleteSource = folder.DeleteSource,
-                UseTempFolder = useTempFolder,
+                StagingPath = stagingPath,
                 FileSizeBytes = fileInfo.Length
             };
         }

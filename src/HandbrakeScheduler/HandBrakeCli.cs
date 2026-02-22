@@ -113,10 +113,10 @@ namespace HandbrakeScheduler
                 if (completedTask == timeoutTask)
                 {
                     // Timeout occurred
-                    _logger.LogWarning("Progress timeout occurred after 15 seconds. Last progress update: {LastUpdate}, Current time: {CurrentTime}",
-                        _lastProgressUpdate, DateTime.Now);
+                    _logger.LogWarning("Progress timeout occurred after {TimeoutMinutes} minutes. Last progress update: {LastUpdate}, Current time: {CurrentTime}",
+                        _progressTimeout.TotalMinutes, _lastProgressUpdate, DateTime.Now);
                     StopTranscoding();
-                    throw new HandbrakeCliWrapperException("Transcoding timed out - no progress for 15 seconds");
+                    throw new HandbrakeCliWrapperException($"Transcoding timed out - no progress for {_progressTimeout.TotalMinutes} minutes");
                 }
 
                 _logger.LogDebug("Process task completed, getting result");
@@ -134,9 +134,10 @@ namespace HandbrakeScheduler
                 _timeoutCancellationTokenSource?.Cancel();
                 _timeoutCancellationTokenSource?.Dispose();
                 _timeoutCancellationTokenSource = null;
+                _process?.Dispose();
+                _process = null;
             }
 
-            _process = null;
             if (success)
             {
                 DoneTranscoding();
@@ -356,7 +357,7 @@ namespace HandbrakeScheduler
 
             try
             {
-                var process = new Process
+                using var process = new Process
                 {
                     StartInfo = new ProcessStartInfo(_cliPath, "--version")
                     {

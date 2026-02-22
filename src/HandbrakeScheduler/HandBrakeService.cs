@@ -32,17 +32,18 @@ namespace HandbrakeScheduler
                 job.InputPath = workingFilePath;
                 
                 var outputDirectory = job.OutputDirectory;
-                // Handle remote file copying if needed
-                if (job.UseTempFolder)
+                // Handle staging if a staging path is configured
+                var useStaging = !string.IsNullOrEmpty(job.StagingPath);
+                if (useStaging)
                 {
                     var tempResult = await HandleRemoteFile(job, tempFileManager, cancellationToken);
                     workingFilePath = tempResult.FilePath;
-                    outputDirectory = Path.GetTempPath();
+                    outputDirectory = job.StagingPath;
                 }
 
                 // Perform transcoding
                 var resultFile = await PerformTranscoding(job, workingFilePath, outputDirectory, cancellationToken);
-                if (job.UseTempFolder)
+                if (useStaging)
                 {
                     // Copy result to output directory
                     await CopyResultToOutput(job, resultFile, tempFileManager, cancellationToken);
@@ -66,7 +67,7 @@ namespace HandbrakeScheduler
             finally
             {
                 // Clean up temp file if we used one
-                if (job.UseTempFolder && !string.IsNullOrEmpty(job.TempFilePath))
+                if (!string.IsNullOrEmpty(job.StagingPath) && !string.IsNullOrEmpty(job.TempFilePath))
                 {
                     tempFileManager.CleanupTempFile(job.TempFilePath);
                 }

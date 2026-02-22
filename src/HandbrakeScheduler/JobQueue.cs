@@ -27,37 +27,38 @@ namespace HandbrakeScheduler
 
         public void EnqueueJob(TranscodeJob job)
         {
-            job.Id = Guid.NewGuid().ToString();
-            job.Status = JobStatus.Pending;
-            _jobs.Enqueue(job);
-            SaveToDisk();
+            lock (_lock)
+            {
+                job.Id = Guid.NewGuid().ToString();
+                job.Status = JobStatus.Pending;
+                _jobs.Enqueue(job);
+                SaveToDisk();
+            }
         }
 
         public bool TryDequeueJob(out TranscodeJob? job)
         {
-            bool result = _jobs.TryDequeue(out job);
-            if (result && job != null)
+            lock (_lock)
             {
-                job.Status = JobStatus.Processing;
-                job.StartedAt = DateTime.Now;
-                SaveToDisk();
+                bool result = _jobs.TryDequeue(out job);
+                if (result && job != null)
+                {
+                    job.Status = JobStatus.Processing;
+                    job.StartedAt = DateTime.Now;
+                    SaveToDisk();
+                }
+                return result;
             }
-            return result;
         }
 
         public void MarkJobFailed(TranscodeJob job, string errorMessage = "")
         {
-            // Don't retry failed jobs - just mark as failed and remove from queue
-            // The source file will remain in the _moved folder
-            job.Status = JobStatus.Failed;
-            job.LastError = errorMessage;
-            
-            // Log the failure
-            var logger = LoggerFactory.Create(builder => builder.AddConsole()).CreateLogger<JobQueue>();
-            logger.LogWarning("Job failed for {FileName}. File remains in _moved folder at: {Path}", 
-                job.FileName, job.InputPath);
-
-            SaveToDisk();
+            lock (_lock)
+            {
+                job.Status = JobStatus.Failed;
+                job.LastError = errorMessage;
+                SaveToDisk();
+            }
         }
 
         public int Count => _jobs.Count;
@@ -143,18 +144,20 @@ namespace HandbrakeScheduler
 
         public void ClearCompleted()
         {
-            // Since ConcurrentQueue doesn't support removal, we'll rebuild it
-            var pendingJobs = _jobs.Where(j => j.Status == JobStatus.Pending || j.Status == JobStatus.Processing).ToList();
-
-            while (_jobs.TryDequeue(out _))
-            { }
-
-            foreach (var job in pendingJobs)
+            lock (_lock)
             {
-                _jobs.Enqueue(job);
-            }
+                var pendingJobs = _jobs.Where(j => j.Status == JobStatus.Pending || j.Status == JobStatus.Processing).ToList();
 
-            SaveToDisk();
+                while (_jobs.TryDequeue(out _))
+                { }
+
+                foreach (var job in pendingJobs)
+                {
+                    _jobs.Enqueue(job);
+                }
+
+                SaveToDisk();
+            }
         }
 
         // Clean shutdown - save current state
@@ -185,7 +188,7 @@ namespace HandbrakeScheduler
         public int RetryCount { get; set; } = 0;
         public string LastError { get; set; } = string.Empty;
         public string FileName => Path.GetFileName(InputPath);
-        public bool UseTempFolder { get; set; }
+        public string StagingPath { get; set; } = string.Empty;
         public string? TempFilePath { get; set; }
         public long FileSizeBytes { get; set; }
     }

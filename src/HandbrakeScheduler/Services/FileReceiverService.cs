@@ -34,33 +34,26 @@ public class HandBrakeFileProcessor : IHandBrakeFileProcessor
 
     public void QueueForProcessing(ReceivedFileInfo fileInfo)
     {
-        ProcessFileWithHandBrake(fileInfo);
-
+        _ = ProcessFileWithHandBrakeAsync(fileInfo);
     }
 
-
-    private async void ProcessFileWithHandBrake(ReceivedFileInfo fileInfo)
+    private async Task ProcessFileWithHandBrakeAsync(ReceivedFileInfo fileInfo)
     {
-        _logger.LogInformation($"Starting HandBrake processing of: {fileInfo.StoredFileName}");
+        _logger.LogInformation("Starting HandBrake processing of: {FileName}", fileInfo.StoredFileName);
 
         try
         {
-            // Create a HandBrake job based on the media info
             var transcodeJob = await CreateTranscodeJob(fileInfo);
-
-            // Add to the existing job queue
             _jobQueue.EnqueueJob(transcodeJob);
 
-            _logger.LogInformation($"HandBrake job created for: {fileInfo.StoredFileName} -> {Path.GetFileName(transcodeJob.OutputDirectory)}");
-            _logger.LogInformation($"Job details - Input: {transcodeJob.InputPath}, Output: {transcodeJob.OutputDirectory}, Preset: {transcodeJob.Preset}");
-
-            // The existing HandBrakeMonitoringService will process this job
-            // We don't wait for completion here to avoid blocking
+            _logger.LogInformation("HandBrake job created for: {FileName} -> {OutputDir}",
+                fileInfo.StoredFileName, Path.GetFileName(transcodeJob.OutputDirectory));
+            _logger.LogInformation("Job details - Input: {Input}, Output: {Output}, Preset: {Preset}",
+                transcodeJob.InputPath, transcodeJob.OutputDirectory, transcodeJob.Preset);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"Failed to create HandBrake job for: {fileInfo.StoredFileName}");
-            throw;
+            _logger.LogError(ex, "Failed to create HandBrake job for: {FileName}", fileInfo.StoredFileName);
         }
     }
 
@@ -73,14 +66,10 @@ public class HandBrakeFileProcessor : IHandBrakeFileProcessor
         FolderSetting? settings = null;
         if (fileInfo.RelativeFilePath.Contains("Movie", StringComparison.OrdinalIgnoreCase))
         {
-            // For movies, create movie folder
-            var movieFolder = SanitizeFileName(fileInfo.FilePath);
             settings = GetFolderSettings("Movie");
         }
         else if (fileInfo.RelativeFilePath.Contains("TV", StringComparison.OrdinalIgnoreCase) || fileInfo.RelativeFilePath.Contains("Series", StringComparison.OrdinalIgnoreCase))
         {
-            // For TV shows, create series/season folder structure
-            var seriesFolder = SanitizeFileName(fileInfo.RelativeFilePath);
             settings = GetFolderSettings("TV");
         }
         else
@@ -130,9 +119,9 @@ public class HandBrakeFileProcessor : IHandBrakeFileProcessor
             InputPath = fileInfo.FilePath,
             OutputDirectory = outputDirectory,
             Preset = preset,
-            DeleteSource = true, // Don't delete source files from AutoMk by default
+            DeleteSource = true,
             CreatedAt = DateTime.Now,
-            UseTempFolder = false, // Use temp folder for safety
+            StagingPath = string.Empty,
             FileSizeBytes = fileSize
         };
     }

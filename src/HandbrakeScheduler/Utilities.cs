@@ -1,4 +1,5 @@
-﻿using System.Runtime.InteropServices;
+using System.Runtime.InteropServices;
+using System.Text;
 
 namespace HandbrakeScheduler;
 
@@ -10,17 +11,26 @@ public static class PathConverter
         if (string.IsNullOrWhiteSpace(inputPath))
             return inputPath;
 
-        // Normalize slashes
-        string normalized = inputPath.Replace('\\', '/');
+        try
+        {
+            // Normalize Unicode (important for macOS)
+            var normalized = inputPath.Normalize(NormalizationForm.FormC);
 
-        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-        {
-            // Already in expected form, return as Windows-style
-            return normalized.Replace('/', '\\');
+            // Handle platform-specific path separators
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            {
+                normalized = normalized.Replace('/', Path.DirectorySeparatorChar);
+            }
+            else
+            {
+                normalized = normalized.Replace('\\', Path.DirectorySeparatorChar);
+            }
+
+            return normalized;
         }
-        else
+        catch (Exception)
         {
-            return normalized.Replace('\\', '/');
+            return inputPath;
         }
     }
 }
