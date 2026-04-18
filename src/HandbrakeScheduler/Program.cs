@@ -1,8 +1,11 @@
-﻿using System.Diagnostics;
+﻿using System.Buffers;
+using System.Diagnostics;
 using System.Text.Json;
+using HandbrakeScheduler.Services;
 using Microsoft.AspNetCore.Http.Features;
-using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Logging.Console;
+using Microsoft.AspNetCore.WebUtilities;
+using Microsoft.Net.Http.Headers;
+using Spectre.Console;
 
 namespace HandbrakeScheduler
 {
@@ -12,6 +15,11 @@ namespace HandbrakeScheduler
         {
             try
             {
+                // Ensure unicode bar/spinner glyphs render correctly on Windows consoles.
+                Console.OutputEncoding = System.Text.Encoding.UTF8;
+
+                DisplayStartupBanner();
+
                 // Clean up any existing HandBrakeCLI processes
                 await CleanupExistingProcesses();
 
@@ -28,22 +36,39 @@ namespace HandbrakeScheduler
                 // Setup graceful shutdown
                 SetupProcessExitHandler(app.Services);
 
-                var handBrakeSettings = app.Services.GetRequiredService<HandBrakeSettings>();
                 var fileTransferSettings = app.Services.GetRequiredService<FileTransferHostSettings>();
 
-                Console.WriteLine("Starting HandBrake Web Service...");
-                Console.WriteLine($"Web API listening on: {fileTransferSettings.ListenUrl}");
-                Console.WriteLine($"File upload endpoint: {fileTransferSettings.ListenUrl}/upload");
-                Console.WriteLine($"Health check endpoint: {fileTransferSettings.ListenUrl}/health");
-                Console.WriteLine("Press Ctrl+C to stop the service.");
+                AnsiConsole.MarkupLine("[green]Starting HandBrake Web Service...[/]");
+                AnsiConsole.MarkupLine($"[dim]Web API:[/] [cyan]{Markup.Escape(fileTransferSettings.ListenUrl)}[/]");
+                AnsiConsole.MarkupLine($"[dim]Upload:[/]  [cyan]{Markup.Escape(fileTransferSettings.ListenUrl)}/upload[/]");
+                AnsiConsole.MarkupLine($"[dim]Health:[/]  [cyan]{Markup.Escape(fileTransferSettings.ListenUrl)}/health[/]");
+                AnsiConsole.MarkupLine("[dim]Press Ctrl+C to stop the service.[/]");
 
                 await app.RunAsync(fileTransferSettings.ListenUrl);
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Fatal error starting application: {ex.Message}");
+                AnsiConsole.MarkupLine($"[red]Fatal error starting application:[/] {Markup.Escape(ex.Message)}");
                 Environment.Exit(1);
             }
+        }
+
+        private static void DisplayStartupBanner()
+        {
+            var banner = new Panel(
+                new Markup("[cyan]HandBrake Scheduler[/]\n\n" +
+                           "[white]Automated video transcoding with HandBrakeCLI[/]\n\n" +
+                           "[dim]•[/] Folder monitoring & web upload intake\n" +
+                           "[dim]•[/] Scheduled time-window processing\n" +
+                           "[dim]•[/] Resolution-aware preset selection"))
+            {
+                Border = BoxBorder.Double,
+                BorderStyle = new Style(Color.Cyan1),
+                Padding = new Padding(2, 0, 2, 0)
+            };
+
+            AnsiConsole.Write(banner);
+            AnsiConsole.WriteLine();
         }
 
         private static WebApplicationBuilder CreateWebApplicationBuilder(string[] args)
@@ -114,8 +139,19 @@ namespace HandbrakeScheduler
                 options.Limits.MaxRequestBodySize = fileTransferSettings.MaxFileSizeBytes;
                 options.Limits.RequestHeadersTimeout = TimeSpan.FromMinutes(5);
                 options.Limits.KeepAliveTimeout = TimeSpan.FromMinutes(10);
+                // Disable slow-client termination. Default (240 B/s) can abort
+                // legitimate multi-hour uploads of 60+ GB files over slow links.
+                options.Limits.MinRequestBodyDataRate = null;
+                options.Limits.MinResponseDataRate = null;
             });
 
+
+            // Dashboard (Spectre.Console live region). Register the hosted starter BEFORE the
+            // monitoring service so the live region is up before any transcode logs fire.
+            services.AddSingleton(new ProgressManagerOptions());
+            services.AddSingleton<DashboardRenderer>();
+            services.AddSingleton<IProgressManager, ProgressManager>();
+            services.AddHostedService<DashboardHostedService>();
 
             // Register HandBrakeCli with proper error handling
             services.AddSingleton<HandBrakeCli>();
@@ -146,13 +182,12 @@ namespace HandbrakeScheduler
             configuration.GetSection("HandBrake").Bind(handBrakeSettings);
 
             logging.ClearProviders();
-            logging.AddConsole(options =>
-            {
-                options.FormatterName = "custom";
-            });
-            logging.AddConsoleFormatter<CustomConsoleFormatter, CustomConsoleFormatterOptions>();
 
-            // Add file logging if enabled and path is specified
+            // Route console logs through the Spectre.Console dashboard. Writing directly to
+            // Console.Out would corrupt the pinned progress panel, so no AddConsole here.
+            logging.Services.AddSingleton<ILoggerProvider>(sp =>
+                new DashboardLoggerProvider(sp.GetRequiredService<DashboardRenderer>()));
+
             if (handBrakeSettings.EnableLogging && !string.IsNullOrEmpty(handBrakeSettings.LogFilePath))
             {
                 try
@@ -164,14 +199,12 @@ namespace HandbrakeScheduler
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"Warning: Could not configure file logging: {ex.Message}");
-                    // Fall back to default file logging
+                    AnsiConsole.MarkupLine($"[yellow]Warning:[/] Could not configure file logging: {Markup.Escape(ex.Message)}");
                     logging.AddFile(options => options.RootPath = AppContext.BaseDirectory);
                 }
             }
             else
             {
-                // Default file logging
                 logging.AddFile(options => options.RootPath = AppContext.BaseDirectory);
             }
 
@@ -297,7 +330,7 @@ namespace HandbrakeScheduler
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Configuration validation failed: {ex.Message}");
+                AnsiConsole.MarkupLine($"[red]Configuration validation failed:[/] {Markup.Escape(ex.Message)}");
                 throw;
             }
         }
@@ -321,22 +354,26 @@ namespace HandbrakeScheduler
         {
             try
             {
-                Console.WriteLine("Shutting down gracefully...");
+                // Stop the dashboard first so subsequent output isn't swallowed by the live region.
+                var renderer = services.GetService<DashboardRenderer>();
+                if (renderer != null)
+                {
+                    await renderer.StopAsync();
+                }
 
-                // Stop the HandBrakeCLI if running
+                AnsiConsole.MarkupLine("[yellow]Shutting down gracefully...[/]");
+
                 var cli = services.GetService<HandBrakeCli>();
                 cli?.StopTranscoding();
 
-                // Give time for current operations to complete
                 await Task.Delay(5000);
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error during graceful shutdown: {ex.Message}");
+                AnsiConsole.MarkupLine($"[red]Error during graceful shutdown:[/] {Markup.Escape(ex.Message)}");
             }
             finally
             {
-                // Force cleanup of any remaining processes
                 await CleanupExistingProcesses();
             }
         }
@@ -348,7 +385,7 @@ namespace HandbrakeScheduler
                 var processes = Process.GetProcessesByName("HandBrakeCli");
                 if (processes.Length > 0)
                 {
-                    Console.WriteLine($"Found {processes.Length} existing HandBrakeCLI process(es). Cleaning up...");
+                    AnsiConsole.MarkupLine($"[yellow]Found {processes.Length} existing HandBrakeCLI process(es). Cleaning up...[/]");
 
                     foreach (var process in processes)
                     {
@@ -362,7 +399,7 @@ namespace HandbrakeScheduler
                         }
                         catch (Exception ex)
                         {
-                            Console.WriteLine($"Warning: Could not kill HandBrakeCLI process {process.Id}: {ex.Message}");
+                            AnsiConsole.MarkupLine($"[yellow]Warning:[/] Could not kill HandBrakeCLI process {process.Id}: {Markup.Escape(ex.Message)}");
                         }
                         finally
                         {
@@ -373,7 +410,7 @@ namespace HandbrakeScheduler
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error during process cleanup: {ex.Message}");
+                AnsiConsole.MarkupLine($"[red]Error during process cleanup:[/] {Markup.Escape(ex.Message)}");
             }
         }
     }
@@ -405,101 +442,166 @@ namespace HandbrakeScheduler
             Directory.CreateDirectory(_settings.IncomingDirectory);
         }
 
+        private const int UploadBufferSize = 1024 * 1024; // 1 MB — good balance for sustained sequential writes
+
         public async Task<FileReceiveResult> ReceiveFileAsync(HttpRequest request)
         {
-            if (!request.HasFormContentType)
+            if (!IsMultipartContentType(request.ContentType))
             {
                 return FileReceiveResult.FailureResult("Request must be multipart/form-data");
             }
 
-            var form = await request.ReadFormAsync();
-
-            // Get metadata
-            if (!form.TryGetValue("metadata", out var metadataValue))
+            var boundary = GetBoundary(request.ContentType!);
+            if (string.IsNullOrEmpty(boundary))
             {
-                return FileReceiveResult.FailureResult("Missing metadata");
+                return FileReceiveResult.FailureResult("Missing multipart boundary");
             }
 
-            FileTransferRequest? transferRequest;
-            try
-            {
-                transferRequest = JsonSerializer.Deserialize<FileTransferRequest>(metadataValue.ToString());
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to deserialize metadata");
-                return FileReceiveResult.FailureResult("Invalid metadata format");
-            }
+            var cancellation = request.HttpContext.RequestAborted;
+            var reader = new MultipartReader(boundary, request.Body);
 
-            if (transferRequest == null)
-            {
-                return FileReceiveResult.FailureResult("Null metadata");
-            }
-
-            var file = form.Files.FirstOrDefault();
-            if (file == null)
-            {
-                return FileReceiveResult.FailureResult("No file uploaded");
-            }
-            // Validate file size
-            if (file?.Length > _settings.MaxFileSizeBytes)
-            {
-                return FileReceiveResult.FailureResult($"File size {file.Length} exceeds maximum {_settings.MaxFileSizeBytes}");
-            }
-
-            // Generate unique filename to avoid conflicts
-            var fileExtension = Path.GetExtension(transferRequest.OriginalFileName);
-
-            var filePath = Path.Combine(_settings.IncomingDirectory, transferRequest.OriginalFileName);
+            FileTransferRequest? transferRequest = null;
+            string? partPath = null;
+            long bytesWritten = 0;
 
             try
             {
-                // Save the file
-                using var fileStream = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None,
-                    bufferSize: 64 * 1024, useAsync: true);
+                MultipartSection? section;
+                while ((section = await reader.ReadNextSectionAsync(cancellation)) != null)
+                {
+                    if (!ContentDispositionHeaderValue.TryParse(section.ContentDisposition, out var cd))
+                    {
+                        continue;
+                    }
 
-                await file.CopyToAsync(fileStream);
-                await fileStream.FlushAsync();
+                    var name = HeaderUtilities.RemoveQuotes(cd.Name).Value;
 
-                _logger.LogInformation($"Received file: {transferRequest.OriginalFileName} ({file.Length} bytes)");
+                    if (cd.IsFormDisposition() && string.Equals(name, "metadata", StringComparison.OrdinalIgnoreCase))
+                    {
+                        using var sr = new StreamReader(section.Body);
+                        var json = await sr.ReadToEndAsync(cancellation);
+                        try
+                        {
+                            transferRequest = JsonSerializer.Deserialize<FileTransferRequest>(json);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError(ex, "Failed to deserialize metadata");
+                            return FileReceiveResult.FailureResult("Invalid metadata format");
+                        }
+                    }
+                    else if (cd.IsFileDisposition())
+                    {
+                        if (partPath != null)
+                        {
+                            return FileReceiveResult.FailureResult("Multiple file parts are not supported");
+                        }
 
-                // Create file info record
+                        // Stream straight to a .part file under incoming. Rename after all
+                        // sections are consumed so the monitor never sees a partial file.
+                        partPath = Path.Combine(_settings.IncomingDirectory, $"upload-{Guid.NewGuid():N}.part");
+
+                        var fileOptions = new FileStreamOptions
+                        {
+                            Mode = FileMode.CreateNew,
+                            Access = FileAccess.Write,
+                            Share = FileShare.None,
+                            BufferSize = UploadBufferSize,
+                            Options = FileOptions.Asynchronous | FileOptions.SequentialScan,
+                            PreallocationSize = transferRequest?.FileSizeBytes ?? 0
+                        };
+
+                        await using var fileStream = new FileStream(partPath, fileOptions);
+                        bytesWritten = await CopyToFileAsync(section.Body, fileStream, _settings.MaxFileSizeBytes, cancellation);
+                        await fileStream.FlushAsync(cancellation);
+                    }
+                }
+
+                if (transferRequest == null)
+                {
+                    return FileReceiveResult.FailureResult("Missing metadata");
+                }
+                if (partPath == null)
+                {
+                    return FileReceiveResult.FailureResult("No file uploaded");
+                }
+
+                var finalPath = Path.Combine(_settings.IncomingDirectory, transferRequest.OriginalFileName);
+                Directory.CreateDirectory(Path.GetDirectoryName(finalPath) ?? _settings.IncomingDirectory);
+                if (File.Exists(finalPath))
+                {
+                    File.Delete(finalPath);
+                }
+                File.Move(partPath, finalPath);
+                partPath = null;
+
+                _logger.LogInformation("Received file: {File} ({Bytes} bytes)",
+                    transferRequest.OriginalFileName, bytesWritten);
+
                 var receivedFileInfo = new ReceivedFileInfo
                 {
                     OriginalFileName = transferRequest.OriginalFileName,
                     StoredFileName = transferRequest.OriginalFileName,
-                    FilePath = filePath,
-                    FileSizeBytes = file.Length,
+                    FilePath = finalPath,
+                    FileSizeBytes = bytesWritten,
                     ReceivedTimestamp = DateTime.UtcNow,
                     TransferRequest = transferRequest,
-                    RelativeFilePath = transferRequest.RelativeFilePath
+                    RelativeFilePath = transferRequest.RelativeFilePath ?? string.Empty
                 };
 
                 _receivedFiles.Add(receivedFileInfo);
-
-                // Queue for processing if enabled
-
                 _fileProcessor.QueueForProcessing(receivedFileInfo);
 
-
-                return FileReceiveResult.SuccessResult(transferRequest.OriginalFileName, filePath, true);
+                return FileReceiveResult.SuccessResult(transferRequest.OriginalFileName, finalPath, true);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $"Failed to save file: {transferRequest.OriginalFileName}");
-
-                // Clean up partial file
-                try
-                {
-                    if (File.Exists(filePath))
-                    {
-                        File.Delete(filePath);
-                    }
-                }
-                catch { }
-
+                _logger.LogError(ex, "Failed to save file: {File}", transferRequest?.OriginalFileName ?? "(unknown)");
                 return FileReceiveResult.FailureResult($"Failed to save file: {ex.Message}");
             }
+            finally
+            {
+                if (partPath != null)
+                {
+                    try { File.Delete(partPath); } catch { }
+                }
+            }
+        }
+
+        private static async Task<long> CopyToFileAsync(Stream source, Stream destination, long maxBytes, CancellationToken ct)
+        {
+            var buffer = ArrayPool<byte>.Shared.Rent(UploadBufferSize);
+            try
+            {
+                long total = 0;
+                int read;
+                while ((read = await source.ReadAsync(buffer.AsMemory(0, UploadBufferSize), ct)) > 0)
+                {
+                    total += read;
+                    if (total > maxBytes)
+                    {
+                        throw new InvalidOperationException($"File exceeds maximum size {maxBytes}");
+                    }
+                    await destination.WriteAsync(buffer.AsMemory(0, read), ct);
+                }
+                return total;
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(buffer);
+            }
+        }
+
+        private static bool IsMultipartContentType(string? contentType)
+        {
+            return !string.IsNullOrEmpty(contentType)
+                && contentType.Contains("multipart/", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string GetBoundary(string contentType)
+        {
+            var mediaType = MediaTypeHeaderValue.Parse(contentType);
+            return HeaderUtilities.RemoveQuotes(mediaType.Boundary).Value ?? string.Empty;
         }
 
         public List<ReceivedFileInfo> GetReceivedFiles()
@@ -569,63 +671,4 @@ namespace HandbrakeScheduler
         public required string RelativeFilePath { get; set; }
         public FileTransferRequest TransferRequest { get; set; } = new();
     }
-}
-
-// Keep your existing custom console formatter
-public sealed class CustomConsoleFormatter : ConsoleFormatter
-{
-    public CustomConsoleFormatter() : base("custom") { }
-
-    public override void Write<TState>(
-       in LogEntry<TState> logEntry,
-       IExternalScopeProvider? scopeProvider,
-       TextWriter textWriter)
-    {
-        var (logLevel, levelColor) = logEntry.LogLevel switch
-        {
-            LogLevel.Trace => ("TRACE", ConsoleColor.DarkGray),
-            LogLevel.Debug => ("DEBUG", ConsoleColor.Gray),
-            LogLevel.Information => ("INFO", ConsoleColor.Green),
-            LogLevel.Warning => ("WARN", ConsoleColor.Yellow),
-            LogLevel.Error => ("ERROR", ConsoleColor.Red),
-            LogLevel.Critical => ("CRITICAL", ConsoleColor.Magenta),
-            _ => ("UNKNOWN", ConsoleColor.White)
-        };
-
-        var timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
-        var message = logEntry.Formatter(logEntry.State, logEntry.Exception);
-
-        // Timestamp in dark gray
-        Console.ForegroundColor = ConsoleColor.DarkGray;
-        textWriter.Write($"{timestamp} ");
-
-        // Log level in its specific color
-        Console.ForegroundColor = levelColor;
-        textWriter.Write($"{logLevel,-8} "); // Left-aligned with padding
-
-        // Message in white (or appropriate color based on level)
-        Console.ForegroundColor = logEntry.LogLevel >= LogLevel.Warning ? levelColor : ConsoleColor.White;
-        textWriter.WriteLine(message);
-
-        Console.ResetColor();
-
-        // Exception output in red with indentation
-        if (logEntry.Exception != null)
-        {
-            Console.ForegroundColor = ConsoleColor.Red;
-            var exceptionLines = logEntry.Exception.ToString().Split('\n');
-            foreach (var line in exceptionLines)
-            {
-                if (!string.IsNullOrWhiteSpace(line))
-                {
-                    textWriter.WriteLine($"    {line.Trim()}");
-                }
-            }
-            Console.ResetColor();
-        }
-    }
-}
-
-public class CustomConsoleFormatterOptions : ConsoleFormatterOptions
-{
 }
