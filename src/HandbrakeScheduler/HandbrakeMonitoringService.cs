@@ -338,10 +338,18 @@ namespace HandbrakeScheduler
             _logger.LogDebug("Video {File} detected as {Width}x{Height}, using preset: {Preset}",
                 Path.GetFileName(normalizedFilePath), videoInfo.Width, videoInfo.Height, selectedPreset);
 
+            var normalizedOutputDirectory = PathConverter.NormalizePath(outputDirectory);
+            _logger.LogInformation(
+                "Created job for {File}: inputFolder={InputFolder}, relativePath='{RelativePath}', outputDir={OutputDir}, preset={Preset}, staging={Staging}, deleteSource={DeleteSource}, size={SizeMb:F1}MB",
+                Path.GetFileName(normalizedFilePath), normalizedInputPath, relativePath ?? string.Empty,
+                normalizedOutputDirectory, selectedPreset,
+                string.IsNullOrEmpty(stagingPath) ? "(none)" : stagingPath,
+                folder.DeleteSource, fileInfo.Length / 1024.0 / 1024.0);
+
             return new TranscodeJob
             {
                 InputPath = normalizedFilePath,
-                OutputDirectory = PathConverter.NormalizePath(outputDirectory),
+                OutputDirectory = normalizedOutputDirectory,
                 Preset = selectedPreset,
                 DeleteSource = folder.DeleteSource,
                 StagingPath = stagingPath,

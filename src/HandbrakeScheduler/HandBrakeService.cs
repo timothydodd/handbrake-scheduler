@@ -23,6 +23,7 @@ namespace HandbrakeScheduler
             try
             {
                 _logger.LogInformation("Processing job: {FileName}", job.FileName);
+                _logger.LogInformation("Job details before processing:\n{Diagnostics}", BuildJobDiagnostics(job, workingFilePath));
 
                 workingFilePath = MoveSourceToMovedFolder(job);
                 Directory.CreateDirectory(job.OutputDirectory);
@@ -37,6 +38,13 @@ namespace HandbrakeScheduler
                     outputDirectory = job.StagingPath;
                 }
 
+                var plannedOutputFile = Path.Combine(
+                    Path.GetFullPath(outputDirectory),
+                    FileUtil.GetFileNameWithNewExtension(workingFilePath, ".mp4"));
+                _logger.LogInformation(
+                    "Transcoding {FileName}: input={Input}, transcode output dir={OutputDir} (staging={UseStaging}), planned output file={OutputFile}, final destination dir={FinalDir}",
+                    job.FileName, workingFilePath, outputDirectory, useStaging, plannedOutputFile, job.OutputDirectory);
+
                 var resultFile = await PerformTranscoding(job, workingFilePath, outputDirectory, cancellationToken);
                 if (useStaging)
                 {
@@ -48,8 +56,9 @@ namespace HandbrakeScheduler
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error processing job: {FileName}. File will remain in _moved folder at: {MovedPath}",
-                    job.FileName, workingFilePath);
+                _logger.LogError(ex,
+                    "Error processing job: {FileName}. File will remain in _moved folder at: {MovedPath}\nFull job diagnostics:\n{Diagnostics}",
+                    job.FileName, workingFilePath, BuildJobDiagnostics(job, workingFilePath));
                 success = false;
             }
             finally
@@ -157,6 +166,115 @@ namespace HandbrakeScheduler
             finally
             {
                 _progress.CompleteProgressTask(taskId);
+            }
+        }
+
+        private static string BuildJobDiagnostics(TranscodeJob job, string workingFilePath)
+        {
+            var sb = new System.Text.StringBuilder();
+
+            sb.AppendLine($"  Id:               {job.Id}");
+            sb.AppendLine($"  FileName:         {job.FileName}");
+            sb.AppendLine($"  Preset:           {job.Preset}");
+            sb.AppendLine($"  Status:           {job.Status}");
+            sb.AppendLine($"  RetryCount:       {job.RetryCount}");
+            sb.AppendLine($"  FileSizeBytes:    {job.FileSizeBytes:N0} ({job.FileSizeBytes / 1024.0 / 1024.0:F1} MB)");
+            sb.AppendLine($"  DeleteSource:     {job.DeleteSource}");
+            sb.AppendLine($"  LastError:        {job.LastError}");
+
+            // Input
+            sb.AppendLine($"  Original InputPath: {job.InputPath}");
+            DescribePath(sb, "Working input file", workingFilePath, expectFile: true);
+
+            // Staging / temp
+            sb.AppendLine($"  StagingPath:      {(string.IsNullOrEmpty(job.StagingPath) ? "(none)" : job.StagingPath)}");
+            if (!string.IsNullOrEmpty(job.StagingPath))
+                DescribePath(sb, "Staging dir", job.StagingPath, expectFile: false);
+            sb.AppendLine($"  TempFilePath:     {job.TempFilePath ?? "(none)"}");
+
+            // Output
+            DescribePath(sb, "Output dir", job.OutputDirectory, expectFile: false);
+            try
+            {
+                var plannedOutputFile = Path.Combine(
+                    Path.GetFullPath(job.OutputDirectory),
+                    FileUtil.GetFileNameWithNewExtension(workingFilePath, ".mp4"));
+                sb.AppendLine($"  Planned output:   {plannedOutputFile}");
+                sb.AppendLine($"    output exists already: {File.Exists(plannedOutputFile)}");
+            }
+            catch (Exception ex)
+            {
+                sb.AppendLine($"  Planned output:   (could not compute: {ex.Message})");
+            }
+
+            return sb.ToString().TrimEnd();
+        }
+
+        private static void DescribePath(System.Text.StringBuilder sb, string label, string path, bool expectFile)
+        {
+            sb.AppendLine($"  {label}: {path}");
+            if (string.IsNullOrEmpty(path))
+            {
+                sb.AppendLine("    (path is empty)");
+                return;
+            }
+
+            try
+            {
+                var fullPath = Path.GetFullPath(path);
+                if (fullPath != path)
+                    sb.AppendLine($"    resolved: {fullPath}");
+
+                if (expectFile)
+                {
+                    var exists = File.Exists(path);
+                    sb.AppendLine($"    file exists: {exists}");
+                    if (exists)
+                        sb.AppendLine($"    size on disk: {new FileInfo(path).Length:N0} bytes");
+                }
+
+                var dir = expectFile ? Path.GetDirectoryName(path) : path;
+                if (!string.IsNullOrEmpty(dir))
+                {
+                    sb.AppendLine($"    containing dir exists: {Directory.Exists(dir)}");
+                    sb.AppendLine($"    containing dir writable: {IsDirectoryWritable(dir)}");
+
+                    try
+                    {
+                        var root = Path.GetPathRoot(Path.GetFullPath(dir));
+                        if (!string.IsNullOrEmpty(root) && Directory.Exists(root))
+                        {
+                            var drive = new DriveInfo(root);
+                            sb.AppendLine($"    volume: {drive.Name} type={drive.DriveType} format={drive.DriveFormat} freeSpace={drive.AvailableFreeSpace:N0} bytes");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        sb.AppendLine($"    volume info unavailable: {ex.Message}");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                sb.AppendLine($"    (error inspecting path: {ex.GetType().Name}: {ex.Message})");
+            }
+        }
+
+        private static bool IsDirectoryWritable(string dir)
+        {
+            try
+            {
+                if (!Directory.Exists(dir))
+                    return false;
+
+                var probe = Path.Combine(dir, $".hbsched_write_test_{Guid.NewGuid():N}");
+                using (File.Create(probe)) { }
+                File.Delete(probe);
+                return true;
+            }
+            catch
+            {
+                return false;
             }
         }
 
