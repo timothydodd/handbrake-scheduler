@@ -2,13 +2,6 @@
 
 A .NET service that automatically monitors directories for video files and transcodes them using HandBrakeCLI with configurable scheduling, time windows, network support, and REST API for file uploads. Features both directory monitoring and web-based file upload capabilities with advanced job management.
 
-## Integration with AutoMk
-
-HandbrakeScheduler integrates seamlessly with [AutoMk](https://github.com/timothydodd/auto-mk) to create an automated disc-to-library pipeline:
-
-1. **AutoMk** automatically rips Blu-ray/DVD discs using MakeMKV
-2. **HandbrakeScheduler** receives and transcodes the ripped MKV files
-
 This integration enables hands-free processing from physical media to optimized video files ready for your Plex/media server.
 
 ## Features
