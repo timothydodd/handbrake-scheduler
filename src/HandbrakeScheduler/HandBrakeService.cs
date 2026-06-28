@@ -45,20 +45,25 @@ namespace HandbrakeScheduler
                     "Transcoding {FileName}: input={Input}, transcode output dir={OutputDir} (staging={UseStaging}), planned output file={OutputFile}, final destination dir={FinalDir}",
                     job.FileName, workingFilePath, outputDirectory, useStaging, plannedOutputFile, job.OutputDirectory);
 
-                // Pre-flight: prove we can actually create the output file before launching HandBrake.
-                // HandBrake's "avio_open2 errno -2" gives no path detail, so surface the real reason here.
+                // Pre-flight: probe whether we can actually create the output file before launching
+                // HandBrake. HandBrake's "avio_open2 errno -2" gives no path detail, so we surface the
+                // real reason here. We only WARN (not throw) so the encode still runs and you keep
+                // seeing progress; if HandBrake then fails on output, this line explains why.
                 var outDirExists = Directory.Exists(outputDirectory);
                 var outDirWritable = IsDirectoryWritable(outputDirectory);
-                _logger.LogInformation(
-                    "Output pre-flight for {FileName}: dir={OutputDir} exists={Exists} writable={Writable}",
-                    job.FileName, outputDirectory, outDirExists, outDirWritable);
                 if (!outDirExists || !outDirWritable)
                 {
-                    throw new InvalidOperationException(
-                        $"Output directory is not usable before transcoding '{job.FileName}'. " +
-                        $"Path='{outputDirectory}', exists={outDirExists}, writable={outDirWritable}. " +
-                        "This is the cause of HandBrake's 'avio_open2 errno -2'. " +
-                        "Check that the volume is mounted, not read-only, and the process has write/Full Disk Access.");
+                    _logger.LogWarning(
+                        "Output pre-flight FAILED for {FileName}: dir={OutputDir} exists={Exists} writable={Writable}. " +
+                        "This is the likely cause of HandBrake's 'avio_open2 errno -2'. " +
+                        "Check the volume is mounted, not read-only, and the process has write/Full Disk Access.",
+                        job.FileName, outputDirectory, outDirExists, outDirWritable);
+                }
+                else
+                {
+                    _logger.LogInformation(
+                        "Output pre-flight OK for {FileName}: dir={OutputDir} exists=True writable=True",
+                        job.FileName, outputDirectory);
                 }
 
                 var resultFile = await PerformTranscoding(job, workingFilePath, outputDirectory, cancellationToken);
