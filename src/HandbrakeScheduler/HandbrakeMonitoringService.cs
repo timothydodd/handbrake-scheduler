@@ -327,7 +327,13 @@ namespace HandbrakeScheduler
             var outputDirectory = Path.Combine(folder.OutputPath, relativePath ?? string.Empty);
 
             var fileInfo = new FileInfo(normalizedFilePath);
-            var stagingPath = !string.IsNullOrEmpty(folder.StagingPath) || IsNetworkPath(normalizedFilePath) || IsNetworkPath(outputDirectory)
+
+            // Staging is only used when explicitly enabled (UseTempFolder, default true). When the
+            // user turns it off, transcode straight to OutputPath regardless of StagingPath/network.
+            var needsStaging = !string.IsNullOrEmpty(folder.StagingPath)
+                || IsNetworkPath(normalizedFilePath)
+                || IsNetworkPath(outputDirectory);
+            var stagingPath = folder.UseTempFolder && needsStaging
                 ? (string.IsNullOrEmpty(folder.StagingPath) ? Path.GetTempPath() : folder.StagingPath)
                 : string.Empty;
 

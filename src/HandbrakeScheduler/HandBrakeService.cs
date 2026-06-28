@@ -36,6 +36,11 @@ namespace HandbrakeScheduler
                     var tempResult = await HandleRemoteFile(job, tempFileManager, cancellationToken);
                     workingFilePath = tempResult.FilePath;
                     outputDirectory = job.StagingPath;
+
+                    // HandBrake transcodes into the staging folder first; make sure it exists,
+                    // otherwise the encode fails with "avio_open2 errno -2".
+                    Directory.CreateDirectory(outputDirectory);
+                    _logger.LogInformation("Ensured staging directory exists: {StagingDir}", outputDirectory);
                 }
 
                 var plannedOutputFile = Path.Combine(

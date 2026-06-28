@@ -95,6 +95,11 @@ namespace HandbrakeScheduler
         [Required]
         public string InputPath { get; set; } = string.Empty;
 
+        // When false, the file is transcoded directly to OutputPath with no temp/staging copy,
+        // even if StagingPath is set or the paths look like network mounts. Defaults to true
+        // so existing network-path staging behaviour is preserved.
+        public bool UseTempFolder { get; set; } = true;
+
         public string StagingPath { get; set; } = string.Empty;
 
         [Required]
