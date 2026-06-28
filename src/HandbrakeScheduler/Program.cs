@@ -188,24 +188,39 @@ namespace HandbrakeScheduler
             logging.Services.AddSingleton<ILoggerProvider>(sp =>
                 new DashboardLoggerProvider(sp.GetRequiredService<DashboardRenderer>()));
 
+            // Resolve where the log file should live. Default to the application's base
+            // directory (the bin folder) so logs are always written next to the executable.
+            // If LogFilePath is set, honour its directory + filename instead.
+            string rootPath = AppContext.BaseDirectory;
+            string fileName = "handbrake-<date:yyyyMMdd>.log";
+
             if (handBrakeSettings.EnableLogging && !string.IsNullOrEmpty(handBrakeSettings.LogFilePath))
             {
-                try
-                {
-                    logging.AddFile(options =>
-                    {
-                        options.RootPath = Path.GetDirectoryName(handBrakeSettings.LogFilePath) ?? AppContext.BaseDirectory;
-                    });
-                }
-                catch (Exception ex)
-                {
-                    AnsiConsole.MarkupLine($"[yellow]Warning:[/] Could not configure file logging: {Markup.Escape(ex.Message)}");
-                    logging.AddFile(options => options.RootPath = AppContext.BaseDirectory);
-                }
+                rootPath = Path.GetDirectoryName(handBrakeSettings.LogFilePath) ?? AppContext.BaseDirectory;
+                var configuredName = Path.GetFileName(handBrakeSettings.LogFilePath);
+                if (!string.IsNullOrEmpty(configuredName))
+                    fileName = configuredName;
             }
-            else
+
+            try
             {
-                logging.AddFile(options => options.RootPath = AppContext.BaseDirectory);
+                // Karambolo's AddFile only writes when it has an explicit file entry; RootPath
+                // alone produces no output. Configure both so a log file is always created.
+                logging.AddFile(options =>
+                {
+                    options.RootPath = rootPath;
+                    options.FileAccessMode = Karambolo.Extensions.Logging.File.LogFileAccessMode.KeepOpenAndAutoFlush;
+                    options.Files = new[]
+                    {
+                        new Karambolo.Extensions.Logging.File.LogFileOptions { Path = fileName }
+                    };
+                });
+
+                AnsiConsole.MarkupLine($"[grey]Logging to file:[/] {Markup.Escape(Path.Combine(rootPath, fileName))}");
+            }
+            catch (Exception ex)
+            {
+                AnsiConsole.MarkupLine($"[yellow]Warning:[/] Could not configure file logging: {Markup.Escape(ex.Message)}");
             }
 
 #if DEBUG
