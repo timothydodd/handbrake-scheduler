@@ -1,0 +1,10 @@
+[package]
+name = "hbs-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "HandbrakeScheduler pure logic: settings, HandBrake output parsing, scheduling, upload routing"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }

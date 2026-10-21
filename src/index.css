@@ -1,0 +1,269 @@
+@import "tailwindcss";
+
+/* ---------------------------------------------------------------------------
+   Design tokens — Portside's Dracula/neon palette. Dark is the default;
+   `[data-theme="light"]` on <html> switches to the light variant. The theme
+   store stamps that attribute (see stores/theme.ts).
+--------------------------------------------------------------------------- */
+:root,
+[data-theme="dark"] {
+  --bg-page: #21222c;
+  --bg-surface: #282a36;
+  --bg-raised: #343746;
+  --bg-muted: rgba(255, 255, 255, 0.05);
+  --bg-input: #21222c;
+
+  --text-primary: #f8f8f2;
+  --text-secondary: #c3c5d4;
+  --text-muted: #8b8fa8;
+  --text-on-accent: #ffffff;
+
+  --border: #44475a;
+  --border-light: #373a4a;
+
+  /* Brand */
+  --accent: #8a5cff;
+  --accent-hover: #a07cff;
+  --secondary: #49a7ff;
+  --brand-pink: #ff4fd8;
+  --brand-cyan: #3ef2ff;
+
+  /* Status — reserved for state, never reused as a series color. */
+  --critical: #ff5555;
+  --warning: #ffb86c;
+  --info: #49a7ff;
+  --good: #50fa7b;
+
+  /* Log levels (validated as a set against --bg-surface). */
+  --lvl-error: #ff5555;
+  --lvl-warning: #ffb86c;
+  --lvl-info: #49a7ff;
+  --lvl-debug: #6b7094;
+
+  /* Chart */
+  --chart-cpu: #8a5cff;
+  --chart-mem: #3ef2ff;
+  --chart-grid: #373a4a;
+
+  --focus-ring: rgba(138, 92, 255, 0.45);
+  --shadow-md: 0 8px 28px rgba(0, 0, 0, 0.45);
+  color-scheme: dark;
+}
+
+[data-theme="light"] {
+  --bg-page: #f3f3f7;
+  --bg-surface: #ffffff;
+  --bg-raised: #f7f7fb;
+  --bg-muted: rgba(40, 42, 54, 0.05);
+  --bg-input: #ffffff;
+
+  --text-primary: #1f2030;
+  --text-secondary: #4a4d63;
+  --text-muted: #72758c;
+  --text-on-accent: #ffffff;
+
+  --border: #d6d7e1;
+  --border-light: #e7e8ef;
+
+  --accent: #6d3fe6;
+  --accent-hover: #5a2fd0;
+  --secondary: #2f7fd6;
+  --brand-pink: #d629b4;
+  --brand-cyan: #0f9fb0;
+
+  --critical: #d63a4a;
+  --warning: #c27417;
+  --info: #2f7fd6;
+  --good: #1f9d55;
+
+  --lvl-error: #d63a4a;
+  --lvl-warning: #c27417;
+  --lvl-info: #2f7fd6;
+  --lvl-debug: #8a90a8;
+
+  --chart-cpu: #6d3fe6;
+  --chart-mem: #0f9fb0;
+  --chart-grid: #e7e8ef;
+
+  --focus-ring: rgba(109, 63, 230, 0.3);
+  --shadow-md: 0 8px 28px rgba(0, 0, 0, 0.12);
+  color-scheme: light;
+}
+
+/* Map tokens to Tailwind color utilities (bg-surface, text-content, …). */
+@theme inline {
+  --color-page: var(--bg-page);
+  --color-surface: var(--bg-surface);
+  --color-raised: var(--bg-raised);
+  --color-muted: var(--bg-muted);
+  --color-input: var(--bg-input);
+
+  --color-content: var(--text-primary);
+  --color-content-secondary: var(--text-secondary);
+  --color-content-muted: var(--text-muted);
+  --color-on-accent: var(--text-on-accent);
+
+  --color-border: var(--border);
+  --color-border-light: var(--border-light);
+
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-secondary: var(--secondary);
+  --color-brand-pink: var(--brand-pink);
+  --color-brand-cyan: var(--brand-cyan);
+
+  --color-critical: var(--critical);
+  --color-warning: var(--warning);
+  --color-info: var(--info);
+  --color-good: var(--good);
+
+  --font-sans: "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-mono: "Cascadia Mono", "JetBrains Mono", Consolas, ui-monospace, monospace;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background-color: var(--bg-page);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* Themed, unobtrusive scrollbars. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-thumb {
+  background-color: var(--border);
+  border-radius: 6px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background-color: var(--text-muted);
+}
+
+/* ---------------------------------------------------------------------------
+   Reusable component classes (referenced by the React components).
+--------------------------------------------------------------------------- */
+@layer components {
+  /* Each button variant inlines the shared base utilities — Tailwind v4
+     `@apply` composes only real utilities, not other component classes. */
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-md px-3.5 py-1.5 text-sm font-medium transition-colors focus:outline-none disabled:cursor-not-allowed disabled:opacity-40 bg-accent text-on-accent hover:bg-accent-hover;
+  }
+  .btn-danger {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-md px-3.5 py-1.5 text-sm font-medium transition-colors focus:outline-none disabled:cursor-not-allowed disabled:opacity-40 bg-critical text-on-accent hover:opacity-90;
+  }
+  /* Outlined tool button: border picks up the accent on hover. */
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-sm font-medium transition-colors focus:outline-none disabled:cursor-not-allowed disabled:opacity-40 text-content-secondary hover:border-accent hover:text-content;
+  }
+  .btn-quiet {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-md px-2 py-1 text-sm font-medium transition-colors focus:outline-none disabled:cursor-not-allowed disabled:opacity-40 text-content-muted hover:bg-muted hover:text-content;
+  }
+  /* Compact action chip used in issue cards and table rows. */
+  .btn-chip {
+    @apply inline-flex items-center gap-1 rounded border border-border px-2 py-0.5 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40 text-content-secondary hover:border-accent hover:text-content;
+  }
+
+  .field {
+    @apply rounded-md border border-border bg-input px-2.5 py-1.5 text-sm text-content placeholder:text-content-muted focus:border-accent focus:outline-none;
+  }
+  .field-label {
+    @apply mb-1 block text-xs font-medium text-content-secondary;
+  }
+
+  .card {
+    @apply rounded-lg border border-border-light bg-surface;
+  }
+  .card-title {
+    @apply text-xs font-semibold uppercase tracking-wide text-content-muted;
+  }
+
+  /* Sub-tab / pill navigation item. */
+  .navtab {
+    @apply px-2.5 py-1.5 text-xs text-content-muted transition-colors hover:text-content;
+  }
+  .navtab-active {
+    @apply border-b-2 border-accent text-content;
+  }
+
+  /* Data tables. */
+  .table {
+    @apply w-full border-collapse text-sm;
+  }
+  .table th {
+    @apply sticky top-0 z-10 whitespace-nowrap border-b border-border bg-surface px-3 py-2 text-left text-xs font-semibold text-content-muted;
+  }
+  .table td {
+    @apply whitespace-nowrap border-b border-border-light px-3 py-1.5 align-middle;
+  }
+  .table tbody tr {
+    @apply transition-colors hover:bg-muted;
+  }
+
+  .mono {
+    @apply font-mono text-[12px];
+  }
+
+  /* Segmented control (Movie / TV and similar either-or choices). */
+  .seg {
+    @apply inline-flex rounded-md border border-border bg-input p-0.5;
+  }
+  .seg-item {
+    @apply inline-flex items-center gap-1.5 rounded px-3 py-1 text-xs font-medium text-content-muted transition-colors hover:text-content disabled:cursor-not-allowed disabled:opacity-40;
+  }
+  .seg-item-active {
+    @apply bg-accent text-on-accent hover:text-on-accent;
+  }
+
+  /* Keyboard shortcut hint. */
+  .kbd {
+    @apply inline-flex min-w-5 items-center justify-center rounded border border-border bg-raised px-1 font-mono text-[10px] text-content-secondary;
+  }
+}
+
+/* Native form controls (checkboxes) tint with the accent. */
+.accent-brand {
+  accent-color: var(--accent);
+}
+
+/* Tinted pill backgrounds derived from a status color. */
+.tint-critical {
+  background-color: color-mix(in srgb, var(--critical) 14%, transparent);
+  color: var(--critical);
+}
+.tint-warning {
+  background-color: color-mix(in srgb, var(--warning) 14%, transparent);
+  color: var(--warning);
+}
+.tint-info {
+  background-color: color-mix(in srgb, var(--info) 14%, transparent);
+  color: var(--info);
+}
+.tint-good {
+  background-color: color-mix(in srgb, var(--good) 14%, transparent);
+  color: var(--good);
+}
+.tint-muted {
+  background-color: var(--bg-muted);
+  color: var(--text-muted);
+}
