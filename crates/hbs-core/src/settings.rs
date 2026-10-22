@@ -42,7 +42,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            handbrake_path: default_handbrake_path().into(),
+            handbrake_path: default_handbrake_path(),
             default_preset: "HQ 1080p30 Surround".into(),
             folders: Vec::new(),
             monitoring_enabled: true,
@@ -51,7 +51,7 @@ impl Default for Settings {
             end_time: String::new(),
             keep_job_logs: false,
             server_enabled: true,
-            listen_address: "0.0.0.0:5000".into(),
+            listen_address: default_listen_address().into(),
             incoming_dir: String::new(),
             max_upload_bytes: 100 << 30,
             staging_dir: String::new(),
@@ -60,11 +60,28 @@ impl Default for Settings {
     }
 }
 
-pub fn default_handbrake_path() -> &'static str {
+/// Where HandBrakeCLI usually is. A Mac app launched from Finder doesn't get
+/// the shell's PATH, so Homebrew's locations are tried before the bare name.
+pub fn default_handbrake_path() -> String {
     if cfg!(windows) {
-        r"C:\Program Files\HandBrake\HandBrakeCLI.exe"
+        return r"C:\Program Files\HandBrake\HandBrakeCLI.exe".into();
+    }
+    if cfg!(target_os = "macos") {
+        for p in ["/opt/homebrew/bin/HandBrakeCLI", "/usr/local/bin/HandBrakeCLI", "/Applications/HandBrakeCLI"] {
+            if Path::new(p).is_file() {
+                return p.into();
+            }
+        }
+    }
+    "HandBrakeCLI".into()
+}
+
+/// macOS keeps port 5000 for the AirPlay Receiver, so the server defaults to 5050 there.
+pub fn default_listen_address() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "0.0.0.0:5050"
     } else {
-        "HandBrakeCLI"
+        "0.0.0.0:5000"
     }
 }
 
@@ -76,14 +93,14 @@ impl Settings {
             self.incoming_dir = base.join("incoming").to_string_lossy().to_string();
         }
         if self.handbrake_path.trim().is_empty() {
-            self.handbrake_path = default_handbrake_path().into();
+            self.handbrake_path = default_handbrake_path();
         }
         if self.default_preset.trim().is_empty() {
             self.default_preset = Settings::default().default_preset;
         }
         self.listen_address = self.listen_address.trim().to_string();
         if self.listen_address.is_empty() {
-            self.listen_address = "0.0.0.0:5000".into();
+            self.listen_address = default_listen_address().into();
         } else if !self.listen_address.contains(':') {
             self.listen_address = format!("0.0.0.0:{}", self.listen_address);
         }
@@ -303,6 +320,19 @@ mod tests {
         assert_eq!(s.folders[0].name, "in");
         assert_eq!(s.folders[0].file_extensions, vec![".mkv", ".mp4"]);
         assert!(s.problems().is_empty());
+    }
+
+    #[test]
+    fn platform_defaults() {
+        let s = Settings::default();
+        assert!(!s.handbrake_path.is_empty());
+        assert!(s.listen_address.starts_with("0.0.0.0:"));
+        if cfg!(target_os = "macos") {
+            assert_eq!(s.listen_address, "0.0.0.0:5050");
+            assert!(s.handbrake_path.starts_with('/') || s.handbrake_path == "HandBrakeCLI");
+        } else {
+            assert_eq!(s.listen_address, "0.0.0.0:5000");
+        }
     }
 
     #[test]

@@ -71,7 +71,7 @@ export default function SettingsPage() {
       </PageHeader>
       <div className="grid max-w-5xl gap-4 px-6 py-5 xl:grid-cols-2">
         <Section title="HandBrake">
-          <Field label="HandBrakeCLI" hint={isWindows ? "Usually C:\\Program Files\\HandBrake\\HandBrakeCLI.exe (the CLI is a separate download from the GUI)." : "Usually HandBrakeCLI on the PATH."}>
+          <Field label="HandBrakeCLI" hint={isWindows ? "Usually C:\\Program Files\\HandBrake\\HandBrakeCLI.exe (the CLI is a separate download from the GUI)." : "Homebrew puts it at /opt/homebrew/bin/HandBrakeCLI (or /usr/local/bin). Use the full path: apps started from Finder don't see the shell's PATH."}>
             <PathInput value={s.handbrakePath} onChange={(v) => set("handbrakePath", v)} />
           </Field>
           <div className="flex items-center gap-3">
@@ -133,7 +133,7 @@ export default function SettingsPage() {
             label="Accept uploads over HTTP"
             hint="AutoMk sends finished rips to /upload. They land in the incoming folder and are queued with the settings of the folder that matches (Movies / TV)."
           />
-          <Field label="Listen on" hint="host:port. 0.0.0.0 = every network interface; 127.0.0.1 = this PC only. Windows may ask to allow it through the firewall.">
+          <Field label="Listen on" hint="host:port. 0.0.0.0 = every network interface; 127.0.0.1 = this PC only. Windows may ask to allow it through the firewall; on a Mac, port 5000 is taken by AirPlay, so the default there is 5050 (set the same port in AutoMk).">
             <input className="field mono w-full" value={s.listenAddress} onChange={(e) => set("listenAddress", e.target.value)} placeholder="0.0.0.0:5000" spellCheck={false} disabled={!s.serverEnabled} />
           </Field>
           {status?.server.error && <span className="text-xs text-critical">{status.server.error}</span>}

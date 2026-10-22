@@ -29,6 +29,7 @@ npx vite build
 
 - `node_modules` was first installed from WSL: run `npm install` again on Windows before building (otherwise rollup/tailwind have Linux native binaries).
 - Vite's file watcher doesn't see edits on `/mnt/f` from WSL. Restart the dev server. Browser preview (`npm run dev`, no Tauri) runs on `src/dev/mockTauri.ts`.
+- **macOS:** `default_handbrake_path` tries the Homebrew locations (Finder-launched apps lack the shell PATH) and the server defaults to port 5050 (5000 is AirPlay). Builds aren't in CI; `npm run tauri build` locally.
 - No outgoing HTTP, so no TLS stack. The server is axum (http1 only).
 - Testing without HandBrake: `crates/hbs-engine/tests/flow.rs` has a fake `HandBrakeCLI` shell script; point Settings at a similar script to try the app.
 
